@@ -213,6 +213,10 @@ body.running #bench [data-pin]{cursor:not-allowed}
 .pcard .row .btn{margin-top:0}
 .minebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}.minebar b{font-size:15px}.minebar input[type=text]{flex:1;min-width:180px}
 .pcard.mine{border-color:#3ddc9755}.mname{cursor:text}
+.buildsheet h4{margin:18px 0 6px;font-size:15px;border-bottom:1px solid var(--line);padding-bottom:4px}.buildsheet ol.steps{margin:0;padding-left:26px}.buildsheet ol.steps li{margin:4px 0}
+.buildsheet .bom{columns:2;margin:0;padding-left:18px}.wc{border-left:10px solid var(--c);padding-left:6px;margin-left:6px;font-size:12px;color:var(--mut,#9aa);white-space:nowrap}
+.bswarn{border:1px solid #ef4444;background:#ef444414;border-radius:8px;padding:8px 12px;margin:10px 0}.bswarn ul{margin:4px 0 0;padding-left:18px}
+.bscode{background:#0b0f0d;border:1px solid var(--line);border-radius:8px;padding:10px;white-space:pre-wrap;font-size:12px;max-height:340px;overflow:auto}
 .h2sep{font-size:15px;font-weight:700;margin:20px 0 6px;padding-top:14px;border-top:1px solid var(--line)}
 .bitem,.pitem{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;border:1px solid transparent;background:none;color:var(--text);padding:7px 9px;border-radius:9px;cursor:pointer}
 .bitem:hover,.pitem:hover{background:var(--panel2)}
@@ -273,6 +277,7 @@ body.running #bench [data-pin]{cursor:not-allowed}
   <button class="btn ghost" id="partsBtn" title="Component library with datasheet info">⌬ Parts</button>
   <button class="btn ghost" id="projBtn" title="Complete projects to load and modify">★ Projects</button>
   <button class="btn ghost" id="learnBtn" title="Short lessons with try-it circuits">◎ Learn</button>
+  <button class="btn ghost" id="buildBtn" title="Parts list and step-by-step wiring to build this circuit for real">🔧 Build it</button>
   <span class="sp"></span>
   <span class="pill" id="runPill"><i></i><span>USB unplugged</span></span>
   <button class="btn ghost" id="saveBtn" title="Save this project by name (Ctrl+S)">💾 Save</button>
@@ -281,7 +286,7 @@ body.running #bench [data-pin]{cursor:not-allowed}
 </header>
 
 <div class="lib" id="lib"><div class="libwin">
-  <div class="libhead"><h2>MicroLab library</h2><div class="ltabs"><button class="ltab" data-ltab="boards">Boards</button><button class="ltab" data-ltab="compare">Compare</button><button class="ltab" data-ltab="parts">Components</button><button class="ltab" data-ltab="projects">Projects</button><button class="ltab" data-ltab="learn">Learn</button></div>
+  <div class="libhead"><h2>MicroLab library</h2><div class="ltabs"><button class="ltab" data-ltab="boards">Boards</button><button class="ltab" data-ltab="compare">Compare</button><button class="ltab" data-ltab="parts">Components</button><button class="ltab" data-ltab="projects">Projects</button><button class="ltab" data-ltab="learn">Learn</button><button class="ltab" data-ltab="build">Build it</button></div>
   <input id="libSearch" placeholder="Search…"><span class="sp"></span><button class="btn sm ghost" id="libClose">✕ Close</button></div>
   <div id="libBody"></div></div></div>
 <div class="app">
@@ -300,7 +305,7 @@ body.running #bench [data-pin]{cursor:not-allowed}
       <div class="viewseg" id="viewSeg"><button data-view="2d" class="on">2D bench</button><button data-view="3d">3D view</button><span class="lockbadge" id="lockBadge" title="While the sketch runs, parts and wires stay put. You can still press buttons, turn knobs and inspect parts. Press Stop to rearrange.">🔒 Layout locked while running</span></div>
       <div id="view3d"><canvas id="c3d"></canvas><div class="hud3d" id="hud3d"></div></div>
       <div class="hint" id="hint"><b>Click a pin</b>, then another pin, to run a wire. Drag parts to move them. Scroll to zoom and drag the mat to pan.</div>
-      <div class="wiretools" id="wiretools"><button class="btn sm" id="tidyBtn" title="Route every unlocked wire neatly around the parts">⌗ Tidy wires</button><label class="note" title="Re-route unlocked wires whenever you move parts or add wires"><input type="checkbox" id="keepTidy"> Keep tidy</label><button class="btn sm ghost" id="curvesBtn" title="Turn unlocked wires back into curves">Curves</button></div>
+      <div class="wiretools" id="wiretools"><button class="btn sm" id="undoBtn" title="Undo (Ctrl+Z)" disabled>↶ Undo</button><button class="btn sm" id="redoBtn" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" disabled>↷ Redo</button><button class="btn sm" id="tidyBtn" title="Route every unlocked wire neatly around the parts">⌗ Tidy wires</button><label class="note" title="Re-route unlocked wires whenever you move parts or add wires"><input type="checkbox" id="keepTidy"> Keep tidy</label><button class="btn sm ghost" id="curvesBtn" title="Turn unlocked wires back into curves">Curves</button></div>
       <div class="zoom"><button id="zin" title="Zoom in">+</button><button id="zout" title="Zoom out">−</button><button id="zfit" title="Fit to view">⤢</button></div>
       <div id="tip"></div>
     </div>
@@ -5561,6 +5566,9 @@ function showTip(e){
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter'){ e.preventDefault(); start(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')){ e.preventDefault(); openSave(); return; }
+  // Ctrl+Z in the code editor or a text box is that box's own undo
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && /^[zy]$/i.test(e.key) && !e.target.closest('textarea, input, select, [contenteditable]')){
+    e.preventDefault(); (e.key.toLowerCase() === 'y' || e.shiftKey) ? redo() : undo(); return; }
   if (['TEXTAREA','INPUT','SELECT'].includes(e.target.tagName)) return;
   if (e.key === 'Escape'){ pending = null; selected = null; renderInspector(); }
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected){ e.preventDefault(); deleteSelected(); }
@@ -6835,6 +6843,129 @@ function mineView(q){
     ${list.length ? `<div class="pgrid">${list.map(card).join('')}</div>` : `<p class="note">${q ? 'No saved projects match your search.' : 'Nothing saved yet. Build something, name it above and press Save.'}</p>`}
     <div class="h2sep">Example projects</div>`;
 }
+/* ── Build it for real: parts list, placement, numbered wiring steps and the code ── */
+const LIBS = {'Servo.h':'Servo (built in)', 'ESP32Servo.h':'ESP32Servo', 'LiquidCrystal_I2C.h':'LiquidCrystal I2C, by Frank de Brabander', 'Adafruit_SSD1306.h':'Adafruit SSD1306',
+  'Adafruit_GFX.h':'Adafruit GFX Library', 'Adafruit_ILI9341.h':'Adafruit ILI9341', 'DHT.h':'DHT sensor library, by Adafruit', 'Adafruit_NeoPixel.h':'Adafruit NeoPixel',
+  'Keypad.h':'Keypad, by Mark Stanley', 'Adafruit_BME280.h':'Adafruit BME280 Library', 'Adafruit_MPU6050.h':'Adafruit MPU6050', 'Adafruit_PWMServoDriver.h':'Adafruit PWM Servo Driver Library',
+  'HX711.h':'HX711 Arduino Library, by Bogdan Necula', 'RTClib.h':'RTClib, by Adafruit', 'TinyGPSPlus.h':'TinyGPSPlus, by Mikal Hart', 'IRremote.h':'IRremote'};
+const BUILT_IN = new Set(['Wire.h', 'SPI.h', 'SD.h', 'SoftwareSerial.h', 'Arduino.h', 'EEPROM.h', 'Stepper.h']);
+const CORES = {avr:'Arduino AVR Boards (already installed)', avr32u4:'Arduino AVR Boards (already installed)', esp32:'esp32 by Espressif Systems', esp32c3:'esp32 by Espressif Systems',
+  esp32s3:'esp32 by Espressif Systems', esp8266:'esp8266 by ESP8266 Community', rp2040:'Raspberry Pi Pico/RP2040/RP2350 by Earle Philhower', rp2350:'Raspberry Pi Pico/RP2040/RP2350 by Earle Philhower',
+  ra4m1:'Arduino UNO R4 Boards', sam3x:'Arduino SAM Boards', imxrt:'Teensyduino (from PJRC)', stm32f1:'STM32 MCU based boards (STM32duino)', stm32f4:'STM32 MCU based boards (STM32duino)'};
+function colorName(hex){
+  const n = {'#1f2326':'black', '#ef4444':'red', '#f59e0b':'orange', '#3b82f6':'blue', '#22c55e':'green', '#eab308':'yellow', '#a855f7':'purple', '#06b6d4':'cyan', '#ec4899':'pink', '#f97316':'orange', '#94a3b8':'gray'};
+  return n[String(hex).toLowerCase()] || 'any color';
+}
+function ohmText(o){ return o >= 1e6 ? +(o / 1e6).toFixed(2) + ' MΩ' : o >= 1000 ? +(o / 1000).toFixed(2) + ' kΩ' : o + ' Ω'; }
+function holeText(k){
+  const m = /^(TP|TN|BP|BN|[a-j])(\d+)$/.exec(k); if (!m) return k;
+  const rail = {TP:'top + rail', TN:'top − rail', BP:'bottom + rail', BN:'bottom − rail'}[m[1]];
+  return rail ? `${rail}, column ${+m[2] + 1}` : `hole ${m[1]}${+m[2] + 1}`;
+}
+function buildSheet(){
+  const b = B(), parts = comps.filter(c => c.type !== 'bb'), bbs = comps.filter(c => c.type === 'bb');
+  // human names: "LED 2", or just "LED" when there's only one
+  const count = {}, seen = {}, name = new Map();
+  for (const c of parts) count[c.type] = (count[c.type] || 0) + 1;
+  for (const c of parts){ const d = DEFS[c.type]; seen[c.type] = (seen[c.type] || 0) + 1; name.set(c.id, count[c.type] > 1 ? `${d.name} ${seen[c.type]}` : d.name); }
+  const detail = c => c.type === 'res' ? ohmText(c.props.ohms) : c.type === 'led' && c.props.color ? c.props.color : '';
+  const bbName = id => bbs.length > 1 ? `breadboard ${bbs.findIndex(x => x.id === id) + 1}` : 'breadboard';
+  const boardPin = id => { const p = b.byId.get(id); return p ? (p.kind === 'gpio' ? b.pname(p.num) : p.label || id) : id; };
+  // pin labels often start with the part's own name ("Joystick GND"); drop that so steps read "Joystick GND", not "Joystick Joystick GND"
+  const short = (c, p) => { const own = new Set(DEFS[c.type].name.toLowerCase().split(/[\s,]+/)), w = String(p.label || p.id).split(' ');
+    while (w.length > 1 && own.has(w[0].toLowerCase())) w.shift(); return w.join(' '); };
+  const pinLabel = (c, pid) => { const p = DEFS[c.type].pins.find(x => x.id === pid); return p ? short(c, p) : pid; };
+  const end = ref => {
+    if (ref.startsWith('B.')) return `${b.short || b.name} pin ${boardPin(ref.slice(2))}`;
+    const i = ref.indexOf('.'), c = comps.find(x => x.id === ref.slice(0, i)), pid = ref.slice(i + 1);
+    if (!c) return ref;
+    return c.type === 'bb' ? `${bbName(c.id)} ${holeText(pid)}` : `${name.get(c.id)} ${pinLabel(c, pid)}`;
+  };
+  // parts list
+  const bom = new Map(); const add = (k, n = 1) => bom.set(k, (bom.get(k) || 0) + n);
+  add(b.name);
+  for (const c of comps){ const d = DEFS[c.type], x = detail(c); add(x ? `${d.name}, ${x}` : d.name); }
+  if (wires.length) add('Jumper wires', wires.length);
+  // placement: parts whose legs go into breadboard holes
+  const place = [];
+  for (const c of parts){
+    const holes = DEFS[c.type].pins.map(p => { const q = pinXY(c, p), h = bbHoleAt(q.x, q.y); return h && [p, h]; }).filter(Boolean);
+    if (!holes.length) continue;
+    const bbId = holes[0][1].split('.')[0];
+    place.push(`Push ${name.get(c.id)}${detail(c) ? ` (${detail(c)})` : ''} into the ${bbName(bbId)}: ` + holes.map(([p, h]) => `${short(c, p)} → ${holeText(h.split('.')[1])}`).join('; ') + '.');
+  }
+  // wiring: ground first, then power, then signals
+  const kind = w => [w.a, w.b].some(r => /^B\./.test(r) && /GND/.test(b.byId.get(r.slice(2))?.kind || '')) || [w.a, w.b].some(r => /\.(TN|BN)\d+$/.test(r)) ? 0
+    : [w.a, w.b].some(r => /^B\./.test(r) && /^(5V|3V3|VIN)$/.test(b.byId.get(r.slice(2))?.kind || '')) || [w.a, w.b].some(r => /\.(TP|BP)\d+$/.test(r)) ? 1 : 2;
+  const wiring = wires.map(w => ({w, k: kind(w)})).sort((x, y) => x.k - y.k)
+    .map(({w, k}) => ({group: ['Ground', 'Power', 'Signals'][k], text: `${end(w.a)} → ${end(w.b)}`, color: colorName(w.color)}));
+  // code, libraries, board setup
+  const code = $('code').value, py = LANG === 'py';
+  const heads = [...new Set([...code.matchAll(/#include\s*[<"]([\w/.]+)[>"]/g)].map(m => m[1]))];
+  const libs = heads.filter(h => !BUILT_IN.has(h)).map(h => LIBS[h] || h.replace(/\.h$/, ''));
+  const notes = [];
+  if (/^esp32/.test(b.fam) && heads.includes('Servo.h')) notes.push('On a real ESP32, install the ESP32Servo library and change #include <Servo.h> to #include <ESP32Servo.h>.');
+  if (b.logic < 5 && parts.some(c => ['hc', 'lcd'].includes(c.type))) notes.push('This board uses 3.3 V logic. Keep any 5 V signal off its pins, for example with the 1 kΩ / 2 kΩ divider on an HC-SR04 ECHO.');
+  const per = {}; for (const w of wires) for (const r of [w.a, w.b]) if (r.startsWith('B.')) per[r] = (per[r] || 0) + 1;
+  const crowded = Object.entries(per).filter(([r, n]) => n > 1 && !/GND|5V|3V3|VIN/.test(b.byId.get(r.slice(2))?.kind || ''));
+  if (crowded.length) notes.push(`${crowded.map(([r, n]) => `${b.short || b.name} pin ${boardPin(r.slice(2))} has ${n} wires`).join('; ')}. A header hole fits one jumper, so run one wire from the pin to a breadboard row and plug the others into that row.`);
+  const shared = Object.entries(per).filter(([r, n]) => n > 1 && /GND|5V|3V3|VIN/.test(b.byId.get(r.slice(2))?.kind || ''));
+  if (shared.length) notes.push('Several parts share power or ground. Use the breadboard\'s + and − rails: one wire from the board to each rail, then each part to the rail.');
+  const warns = [...warnings.values()].filter(w => w.level === 'critical' || w.level === 'warning').map(w => w.msg);
+  return {board: b, bom: [...bom], place, wiring, code, py, libs, notes, warns, core: CORES[b.fam]};
+}
+function buildText(S){
+  const L = [`BUILD SHEET: ${S.board.name}`, '', 'PARTS', ...S.bom.map(([k, n]) => `  ${n} × ${k}`), ''];
+  if (S.warns.length) L.push('FIX FIRST (MicroLab warnings)', ...S.warns.map(w => '  ! ' + w), '');
+  L.push('BEFORE YOU START', '  Unplug the USB cable while you wire. Plug it in only after checking every connection.', ...S.notes.map(t => '  Note: ' + t), '');
+  let n = 0;
+  if (S.place.length) L.push('PLACE THE PARTS', ...S.place.map(t => `  ${++n}. ${t}`), '');
+  for (const g of ['Ground', 'Power', 'Signals']){ const ws = S.wiring.filter(w => w.group === g); if (ws.length) L.push(`WIRES: ${g.toUpperCase()}`, ...ws.map(w => `  ${++n}. ${w.text}  (${w.color} wire)`), ''); }
+  L.push('UPLOAD THE CODE');
+  if (S.py) L.push('  1. Install MicroPython on the board and open Thonny.', '  2. Paste the code and save it on the board as main.py.');
+  else { L.push(`  1. Arduino IDE → Tools → Board → ${S.board.name}${S.core && !/already installed/.test(S.core) ? `. Boards Manager package: ${S.core}` : ''}.`);
+    L.push(S.libs.length ? `  2. Library Manager → install: ${S.libs.join(', ')}.` : '  2. No extra libraries needed.', '  3. Paste the code, pick the port, press Upload.'); }
+  L.push('', 'CODE', S.code);
+  return L.join('\n');
+}
+function buildView(){
+  const S = buildSheet(), real = comps.some(c => c.type !== 'bb');
+  if (!real) return `<div class="lone"><p class="note">Add some parts and wires first. The build sheet turns your circuit into a parts list and numbered wiring steps.</p></div>`;
+  let n = 0; const li = t => `<li value="${++n}">${t}</li>`;
+  const groups = ['Ground', 'Power', 'Signals'].map(g => { const ws = S.wiring.filter(w => w.group === g); return ws.length ? `<h4>Wires: ${g.toLowerCase()}</h4><ol class="steps">${ws.map(w => li(`${esc(w.text)} <span class="wc" style="--c:${w.color === 'any color' ? '#888' : w.color}">${w.color} wire</span>`)).join('')}</ol>` : ''; }).join('');
+  return `<div class="lone buildsheet">
+    <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="margin:0">Build sheet: ${esc(S.board.name)}</h3>
+      <div class="row"><button class="btn sm" id="bsCopy">Copy as text</button><button class="btn sm go" id="bsDown">⬇ Download</button></div></div>
+    ${S.warns.length ? `<div class="bswarn"><b>Fix these first.</b> MicroLab flagged them while your circuit ran:<ul>${S.warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
+    <h4>Parts</h4><ul class="bom">${S.bom.map(([k, n]) => `<li><b>${n} ×</b> ${esc(k)}</li>`).join('')}</ul>
+    <h4>Before you start</h4><p class="note">Unplug the USB cable while you wire. Plug it in only after checking every connection against this list.</p>
+    ${S.notes.map(t => `<p class="note">⚠ ${esc(t)}</p>`).join('')}
+    ${S.place.length ? `<h4>Place the parts</h4><ol class="steps">${S.place.map(t => li(esc(t))).join('')}</ol>` : ''}
+    ${groups}
+    <h4>Upload the code</h4><ol class="steps">${S.py ? `<li>Install MicroPython on the board and open Thonny.</li><li>Paste the code and save it on the board as <code>main.py</code>.</li>`
+      : `<li>Arduino IDE → Tools → Board → <b>${esc(S.board.name)}</b>.${S.core && !/already installed/.test(S.core) ? ` If it isn't listed, install <b>${esc(S.core)}</b> in Boards Manager.` : ''}</li>
+         <li>${S.libs.length ? `Library Manager → install <b>${S.libs.map(esc).join('</b>, <b>')}</b>.` : 'No extra libraries needed.'}</li><li>Paste the code, pick the port, press Upload.</li>`}</ol>
+    <h4>Code</h4><pre class="bscode">${esc(S.code)}</pre>
+  </div>`;
+}
+async function buildDownload(){
+  const S = buildSheet(), body = $('libBody').querySelector('.buildsheet').cloneNode(true);
+  body.querySelectorAll('button').forEach(x => x.remove());
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Build sheet: ${esc(S.board.name)}</title><style>
+body{font:15px/1.5 system-ui,sans-serif;max-width:820px;margin:24px auto;padding:0 16px;color:#111}h3{font-size:22px}h4{margin:20px 0 6px;font-size:16px;border-bottom:1px solid #ddd}
+ol.steps li{margin:4px 0}.wc{border-left:10px solid var(--c);padding-left:5px;font-size:13px;color:#555}.bswarn{border:2px solid #d33;padding:8px 12px;border-radius:6px}
+pre{background:#f4f4f4;padding:12px;border-radius:6px;white-space:pre-wrap;font-size:12.5px}.note{color:#444}@media print{pre{font-size:10.5px}}</style></head>
+<body>${body.innerHTML}<p class="note">Made with MicroLab.</p></body></html>`;
+  const fn = `build-sheet-${(S.board.short || S.board.name).replace(/[^\w]+/g, '-')}.html`;
+  if (typeof window.claude?.use === 'function'){
+    const dl = await window.claude.use('downloads');
+    if (!dl) return;
+    try { await dl.save({filename: fn, data: html}); } catch(e){}
+    return;
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], {type: 'text/html'})); a.download = fn;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 function projectsView(){
   const q = (LIB.q || '').toLowerCase();
   const list = PROJECTS.filter(p => !q || (p.title + ' ' + p.desc + ' ' + p.parts.join(' ') + ' ' + BOARDS[p.board].name).toLowerCase().includes(q));
@@ -6998,11 +7129,12 @@ function renderLib(){
   const el = $('libBody'); if (!el || !LIB.open) return;
   document.querySelectorAll('#lib .ltab').forEach(t => t.classList.toggle('on', t.dataset.ltab === LIB.tab));
   $('libSearch').placeholder = {parts:'Search parts: name, protocol, use…', projects:'Search projects: part, board, idea…', learn:'Search lessons…'}[LIB.tab] || 'Search boards: name, chip, Wi-Fi…';
-  $('libSearch').style.visibility = LIB.tab === 'compare' ? 'hidden' : '';
+  $('libSearch').style.visibility = LIB.tab === 'compare' || LIB.tab === 'build' ? 'hidden' : '';
   if (LIB.tab === 'boards') el.innerHTML = `<div class="lcols"><div class="llist">${boardList()}</div><div class="ldetail">${boardSheet(LIB.board)}</div></div>`;
   else if (LIB.tab === 'compare') el.innerHTML = `<div class="lone">${compareView()}</div>`;
   else if (LIB.tab === 'projects') el.innerHTML = projectsView();
   else if (LIB.tab === 'learn') el.innerHTML = typeof learnView === 'function' ? learnView() : '';
+  else if (LIB.tab === 'build') el.innerHTML = buildView();
   else el.innerHTML = typeof partsView === 'function' ? partsView() : '';
 }
 function openLib(tab, item){
@@ -7026,6 +7158,8 @@ $('lib').addEventListener('click', e => {
     else if (act === 'file' && p) downloadProject(p.name, p.state);
     else if (act === 'del'){ if (ma.dataset.arm){ deleteMine(id); renderLib(); } else { ma.dataset.arm = 1; ma.textContent = 'Really delete?'; setTimeout(() => { if (ma.isConnected){ delete ma.dataset.arm; ma.textContent = 'Delete'; } }, 2500); } }
     return; }
+  if (t.id === 'bsDown'){ buildDownload(); return; }
+  if (t.id === 'bsCopy'){ navigator.clipboard?.writeText(buildText(buildSheet())).then(() => { t.textContent = 'Copied ✓'; setTimeout(() => t.isConnected && (t.textContent = 'Copy as text'), 1500); }, () => {}); return; }
   if (t.id === 'mineSave'){ if (saveMine($('mineName').value)) renderLib(); return; }
   if (t.id === 'mineImport'){ $('mineFile').click(); return; }
   const pj = t.closest('[data-proj]'); if (pj){ loadProject(PROJECTS.find(x => x.id === pj.dataset.proj)); return; }
@@ -7052,6 +7186,7 @@ $('cmpBtn').onclick = () => openLib('compare');
 $('partsBtn').onclick = () => openLib('parts');
 $('projBtn').onclick = () => openLib('projects');
 $('learnBtn').onclick = () => openLib('learn');
+$('buildBtn').onclick = () => openLib('build');
 
 /* ── Components tab ── */
 const PART_ALIAS = {hall:'flame', touch:'flame', abuzz:'buzzer', tilt:'switch', tm1637:'seg7'};
@@ -7531,11 +7666,46 @@ const PY_TOK = /(#[^\n]*)|([rRbBfF]{0,2}(?:"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.
 
 /* ═══════════════════ Persistence ═══════════════════ */
 let saveT = null;
+/* ── Undo / redo ──
+   Covers the circuit (parts, wires, rotation, board). The code editor keeps its own undo.
+   save() runs after every edit, so it is the commit point: whenever the circuit differs from the
+   last recorded one, the old version goes on the undo stack. Edits made while a sketch runs
+   (knobs, buttons, burnt parts) are inputs to the simulation, not edits, so they aren't recorded. */
+const HIST = {undo: [], redo: [], cur: null, mute: false, max: 60};
+function circuitKey(){
+  return JSON.stringify({board: boardKey, nid, wires, comps: comps.map(({id, type, x, y, turn, props}) => ({id, type, x, y, turn, props}))});
+}
+function histRecord(){
+  const k = circuitKey();
+  if (HIST.cur === null || HIST.mute || running){ HIST.cur = k; return; }
+  if (k === HIST.cur) return;
+  HIST.undo.push(HIST.cur); if (HIST.undo.length > HIST.max) HIST.undo.shift();
+  HIST.redo = []; HIST.cur = k; histUI();
+}
+function histApply(k){
+  const d = JSON.parse(k); HIST.mute = true;
+  try {
+    if (d.board !== boardKey) setBoard(d.board);
+    comps = d.comps.map(c => ({...c, props: {...c.props}})); wires = d.wires.map(w => ({...w, pts: w.pts && w.pts.map(p => ({...p}))}));
+    nid = d.nid; selected = null; pending = null; renderInspector(); bump(); save();
+    clearTimeout(saveT); localStorage.setItem('mcusim.v2', JSON.stringify(benchState()));
+  } catch(e){} finally { HIST.mute = false; }
+  HIST.cur = k; histUI();
+}
+function undo(){ histStep(HIST.undo, HIST.redo); }
+function redo(){ histStep(HIST.redo, HIST.undo); }
+function histStep(from, to){
+  if (layoutLocked()){ lockNote(); return; }
+  clearTimeout(saveT); histRecord();          // commit any edit still waiting in the save timer first
+  if (!from.length) return;
+  to.push(circuitKey()); histApply(from.pop());
+}
+function histUI(){ const u = $('undoBtn'), r = $('redoBtn'); if (u){ u.disabled = !HIST.undo.length; r.disabled = !HIST.redo.length; } }
 function benchState(){
   return {comps: comps.map(({id, type, x, y, turn, props, burnt}) => ({id, type, x, y, turn, props, burnt})), wires, nid, board: boardKey, lang: LANG,
     code: LANG === 'cpp' ? $('code').value : (CODEBUF.cpp ?? DEFAULT_CODE), py: LANG === 'py' ? $('code').value : CODEBUF.py};
 }
-function save(){ clearTimeout(saveT); saveT = setTimeout(() => { if (keepTidy && !routing && !wdrag && !drag && geoKey() !== lastGeo){ autoRoute(); return; } try { localStorage.setItem('mcusim.v2', JSON.stringify(benchState())); } catch(e){} }, 300); }
+function save(){ clearTimeout(saveT); saveT = setTimeout(() => { if (keepTidy && !routing && !wdrag && !drag && geoKey() !== lastGeo){ autoRoute(); return; } histRecord(); try { localStorage.setItem('mcusim.v2', JSON.stringify(benchState())); } catch(e){} }, 300); }
 function load(){
   try {
     const d = JSON.parse(localStorage.getItem('mcusim.v2') || localStorage.getItem('mcusim.v1') || 'null');
@@ -8097,7 +8267,7 @@ function tick(){
   render(); renderMsgs(); updateLive();
 }
 
-load(); renderLangUI(); renderPalette(); renderBoardSeg(); renderBoardTab(); renderInspector(); renderChallenges(); setRunUI(); highlight();
+load(); HIST.cur = circuitKey(); $('undoBtn').onclick = undo; $('redoBtn').onclick = redo; renderLangUI(); renderPalette(); renderBoardSeg(); renderBoardTab(); renderInspector(); renderChallenges(); setRunUI(); highlight();
 if (comps.length) $('hint').style.display = 'none';
 requestAnimationFrame(fit); window.addEventListener('resize', () => {});
 setInterval(tick, 40); tick();

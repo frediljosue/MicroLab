@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.0 — 2026-11-17
+- **Undo / redo:** `Ctrl+Z`, `Ctrl+Shift+Z` or `Ctrl+Y`, plus ↶ Undo / ↷ Redo buttons on the bench. Covers adding, moving, rotating and deleting parts, wires, Clear circuit, loading projects and switching boards (60 steps). Ctrl+Z inside the code editor stays the editor's own text undo. Knob and button changes while a sketch runs aren't recorded, and undo is locked while running.
+- **🔧 Build it:** turns the bench into a build sheet: a parts list, where each part goes on the breadboard, numbered wiring steps (ground, then power, then signals, with wire colors), the Arduino IDE board package and libraries to install, and the code. It warns about anything MicroLab flagged, pins with more than one wire, and real-hardware gotchas such as ESP32Servo on an ESP32. Copy it as text or download a printable page.
+
 ## 2.2.0 — 2026-11-17
 - **Practice keeps your board:** Load solution no longer switches to the Uno. Each solution is re-pinned for the board you picked: I²C goes to the board's SDA/SCL, analog inputs to ADC pins, other pins keep their number when they can, and flash, serial, input-only, analog-only and boot-strapping pins are skipped. On 3.3 V boards sensors run from 3V3, ADC math is scaled, and an HC-SR04 gets a 1 kΩ / 2 kΩ divider on ECHO. The console lists every pin that moved. If a board doesn't have enough free pins (keypad and robot on the ESP8266 / D1 Mini), it loads on the Uno and says why. Every solution is tested on the Uno, ESP32, Pico, Nano and Mega.
 - **My projects:** press 💾 Save (or `Ctrl+S`), name what's on the bench, and it appears under ★ Projects with Load, Delete and rename (double-click the name). Saving again with the same name updates that save. Board, language, code, parts, rotation and wires are all kept.

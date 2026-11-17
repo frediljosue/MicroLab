@@ -43,6 +43,8 @@ Switch the board to **Raspberry Pi Pico** (or an ESP32), then press **MicroPytho
 
 ## Tips
 
+- **Ctrl+Z** undoes circuit changes and **Ctrl+Shift+Z** redoes them. There are Undo and Redo buttons on the bench too.
+- **🔧 Build it** gives a parts list and numbered wiring steps to build your circuit on a real breadboard. Download it to print.
 - Press **💾 Save** (or `Ctrl+S`) to keep your own project by name. It shows up under **★ Projects → My projects**, where **⬇ File** downloads it and **⬆ Open file** opens one on any device.
 - Select a part and press **R** to rotate it 90° clockwise (**Shift+R** for counter-clockwise), or use the Rotate buttons in the Inspector.
 - **Tidy wires** routes every wire neatly. **Keep tidy** re-routes as you move parts.
