@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.0 — 2026-11-17
+- **Rotate parts:** select a part and press `R` (clockwise) or `Shift+R` (counter-clockwise), or use the Rotate buttons in the Inspector. Pins, wires, wire routing, breadboard holes, the 3D view and saved layouts all follow the rotation. The breadboard itself doesn't rotate, and rotation is locked while a sketch runs.
+- Breadboard snapping now picks the position that seats the most legs in holes, so a resistor turned upright lands with both legs plugged in.
+
 ## 2.1.0 — 2026-11-17
 - New project: **Retro Racer**, a color TFT game for ESP32 with joystick and buttons, using flicker-free partial redraws.
 - **Layout lock while running:** parts and wires can't be moved, added, rewired or deleted by accident while a sketch runs. Buttons, keypads, knobs, joysticks and the Inspector still work. A "Layout locked while running" badge shows next to the 2D/3D switch; press Stop to rearrange.

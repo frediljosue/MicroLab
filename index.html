@@ -363,6 +363,7 @@ body.running #bench [data-pin]{cursor:not-allowed}
         <li>Click a pin, then another pin, to connect them. Dragging from pin to pin works too. <kbd>Esc</kbd> cancels.</li>
         <li>Hover over any pin to see its name, and its live voltage while running.</li>
         <li>Breadboard: drop LEDs, resistors, buttons and transistors onto the holes and they snap in. Each a–e and f–j column strip is connected, and the rails run the full length. Dragging the breadboard carries its parts along.</li>
+        <li>Select a part and press <kbd>R</kbd> to rotate it 90° clockwise, or <kbd>Shift</kbd>+<kbd>R</kbd> to go the other way. The Inspector has Rotate buttons too. Wires and breadboard holes follow the pins.</li>
         <li>Select a wire and press <kbd>Delete</kbd> to remove it. Wire colors are automatic: GND black, 5V red, 3.3V orange.</li>
         <li><b>Organizing wires:</b> <b>⌗ Tidy wires</b> routes every wire with right-angle runs around the parts, spacing parallel wires apart. Tick <b>Keep tidy</b> to re-route as you move things.</li>
         <li><b>Shaping a wire by hand:</b> select it, drag a <b>+</b> to add a bend, drag the white dots, and double-click a dot to remove it. Hand-shaped wires lock automatically (orange dots), so Tidy never moves them. Untick the lock or press Auto-route to hand a wire back.</li>
@@ -1294,11 +1295,63 @@ function bbHoleAt(x, y){
   for (const bb of comps){ if (bb.type !== 'bb') continue; const h = nearestHole(bb, x, y); if (h && h.d < 1.5) return bb.id + '.' + BB_KEYS[BB_YS.indexOf(h.yy)] + h.i; }
   return null;
 }
-function snapToBreadboard(c){
-  if (c.type === 'bb') return;
-  let best = null;
-  for (const bb of comps) if (bb.type === 'bb') for (const p of DEFS[c.type].pins){ const h = nearestHole(bb, c.x + p.x, c.y + p.y); if (h && (!best || h.d < best.d)) best = {...h, p}; }
-  if (best && best.d < 9){ c.x = best.hx - best.p.x; c.y = best.hy - best.p.y; }
+/* ── Part rotation ──
+   c.turn = number of 90° clockwise turns (0–3). Parts are drawn in their own local
+   coordinates (0..w, 0..h); these helpers map local points to the bench, keeping the
+   rotated part's top-left corner at (c.x, c.y). */
+const ROTATABLE = c => c.type !== 'bb';
+function rotPt(c, x, y){
+  const d = DEFS[c.type];
+  switch ((c.turn || 0) & 3){
+    case 1: return {x: c.x + d.h - y, y: c.y + x};
+    case 2: return {x: c.x + d.w - x, y: c.y + d.h - y};
+    case 3: return {x: c.x + y, y: c.y + d.w - x};
+    default: return {x: c.x + x, y: c.y + y};
+  }
+}
+function toLocal(c, wx, wy){
+  const d = DEFS[c.type], x = wx - c.x, y = wy - c.y;
+  switch ((c.turn || 0) & 3){
+    case 1: return {x: y, y: d.h - x};
+    case 2: return {x: d.w - x, y: d.h - y};
+    case 3: return {x: d.w - y, y: x};
+    default: return {x, y};
+  }
+}
+const pinXY = (c, p) => rotPt(c, p.x, p.y);
+/* world-space rectangle of a local rectangle (used for bounds and wire-routing obstacles) */
+function compRect(c, lx = 0, ly = 0, lw = DEFS[c.type].w, lh = DEFS[c.type].h){
+  const a = rotPt(c, lx, ly), b = rotPt(c, lx + lw, ly + lh);
+  return {x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y)};
+}
+function rotTransform(c){
+  const d = DEFS[c.type];
+  return ['', `translate(${d.h} 0) rotate(90)`, `translate(${d.w} ${d.h}) rotate(180)`, `translate(0 ${d.w}) rotate(270)`][(c.turn || 0) & 3];
+}
+function rotateComp(c, dir = 1){
+  if (!c || !ROTATABLE(c)) return false;
+  const onBB = DEFS[c.type].pins.some(p => { const q = pinXY(c, p); return bbHoleAt(q.x, q.y); });
+  const r0 = compRect(c), cx = r0.x + r0.w / 2, cy = r0.y + r0.h / 2;
+  c.turn = (((c.turn || 0) + dir) % 4 + 4) % 4;
+  const r1 = compRect(c);
+  c.x += Math.round((cx - (r1.x + r1.w / 2)) / 2) * 2;     // turn about the centre, stay on the 2-px grid
+  c.y += Math.round((cy - (r1.y + r1.h / 2)) / 2) * 2;
+  snapToBreadboard(c, onBB ? 48 : 9);       // a part that was plugged in stays plugged in
+  return true;
+}
+function snapToBreadboard(c, reach = 9){
+  if (c.type === 'bb' || !comps.some(b => b.type === 'bb')) return;
+  // try lining each leg up with each nearby hole, and keep the shift that seats the most legs
+  const P = DEFS[c.type].pins.map(p => pinXY(c, p)); let best = null;
+  for (const bb of comps) if (bb.type === 'bb') for (const q of P){
+    const i0 = Math.round((q.x - bb.x - 24) / 12);
+    for (let i = Math.max(0, i0 - 3); i <= Math.min(29, i0 + 3); i++) for (const yy of BB_YS){
+      const dx = bb.x + 24 + i * 12 - q.x, dy = bb.y + yy - q.y, d = Math.hypot(dx, dy); if (d >= reach) continue;
+      const n = P.filter(o => bbHoleAt(o.x + dx, o.y + dy)).length;
+      if (!best || n > best.n || (n === best.n && d < best.d)) best = {dx, dy, d, n};
+    }
+  }
+  if (best){ c.x += Math.round(best.dx); c.y += Math.round(best.dy); }
 }
 function rotateEnc(c, dir){
   const seq = dir > 0 ? [[1,0],[0,0],[0,1],[1,1]] : [[0,1],[0,0],[1,0],[1,1]];
@@ -1341,7 +1394,7 @@ function solve(){
     for (const r of 'ghij') u(bb.id + '.f' + i, bb.id + '.' + r + i);
     if (i) for (const rl of ['TP','TN','BP','BN']) u(bb.id + '.' + rl + '0', bb.id + '.' + rl + i);
   }
-  if (bbs.length) for (const c of comps){ if (c.type === 'bb') continue; for (const p of DEFS[c.type].pins){ const h = bbHoleAt(c.x + p.x, c.y + p.y); if (h) u(c.id + '.' + p.id, h); } }
+  if (bbs.length) for (const c of comps){ if (c.type === 'bb') continue; for (const p of DEFS[c.type].pins){ const q = pinXY(c, p), h = bbHoleAt(q.x, q.y); if (h) u(c.id + '.' + p.id, h); } }
   for (const c of comps){
     if (c.type === 'button' && (c.pressed || c.props.latched)) u(c.id+'.1', c.id+'.2');
     if (c.type === 'switch') u(c.id+'.COM', c.id + (c.props.pos ? '.2' : '.1'));
@@ -4632,7 +4685,8 @@ function pinPos(pid){
   const dir = pd.dir ? {L:{dx:-1,dy:0}, R:{dx:1,dy:0}, U:{dx:0,dy:-1}, D:{dx:0,dy:1}}[pd.dir]
     : c.type === 'bb' ? (pd.y < 104 ? {dx:0,dy:-1} : {dx:0,dy:1})
     : pd.y === 0 ? {dx:0,dy:-1} : pd.y === d.h ? {dx:0,dy:1} : pd.x === 0 ? {dx:-1,dy:0} : {dx:1,dy:0};
-  return {x: c.x + pd.x, y: c.y + pd.y, ...dir};
+  let {dx, dy} = dir; for (let t = (c.turn || 0) & 3; t > 0; t--) [dx, dy] = [-dy, dx];   // turn the exit direction with the part
+  return {...pinXY(c, pd), dx, dy};
 }
 /* ═══════════════════ Wire routing ═══════════════════ */
 let keepTidy = false; try { keepTidy = localStorage.getItem('mcusim.tidy') === '1'; } catch(e){}
@@ -4659,7 +4713,7 @@ function pinStub(pid, L = 20){
   const dx = Pp.dir !== undefined ? 0 : Pp.dx, dy = Pp.dir !== undefined ? Pp.dir : Pp.dy;
   return {x: Pp.x + dx * L, y: Pp.y + dy * L};
 }
-const geoKey = () => boardKey + comps.map(c => `${c.id}${c.x},${c.y}`).join() + '|' + wires.map(w => w.a + w.b + (w.manual ? JSON.stringify(w.pts || 0) : '')).join();
+const geoKey = () => boardKey + comps.map(c => `${c.id}${c.x},${c.y},${c.turn || 0}`).join() + '|' + wires.map(w => w.a + w.b + (w.manual ? JSON.stringify(w.pts || 0) : '')).join();
 function simplifyRoute(P){
   const out = [];
   for (const p of P){ const q = out[out.length - 1]; if (q && q.x === p.x && q.y === p.y) continue; out.push({x: p.x, y: p.y}); }
@@ -4672,14 +4726,14 @@ function autoRoute(onlyIds){
   try {
     const b = B(), G = 10;
     let x0 = BX - 90, y0 = BY - 90, x1 = BX + b.w + 90, y1 = BY + b.h + 90;
-    for (const c of comps){ const d = DEFS[c.type]; x0 = Math.min(x0, c.x - 100); y0 = Math.min(y0, c.y - 100); x1 = Math.max(x1, c.x + d.w + 100); y1 = Math.max(y1, c.y + d.h + 100); }
+    for (const c of comps){ const r = compRect(c); x0 = Math.min(x0, r.x - 100); y0 = Math.min(y0, r.y - 100); x1 = Math.max(x1, r.x + r.w + 100); y1 = Math.max(y1, r.y + r.h + 100); }
     for (const w of wires) for (const q of w.pts || []){ x0 = Math.min(x0, q.x - 40); y0 = Math.min(y0, q.y - 40); x1 = Math.max(x1, q.x + 40); y1 = Math.max(y1, q.y + 40); }
     const W = Math.ceil((x1 - x0) / G) + 1, H = Math.ceil((y1 - y0) / G) + 1, N = W * H;
     const block = new Uint8Array(N), used = new Float32Array(N);
     const gx = x => Math.max(0, Math.min(W - 1, Math.round((x - x0) / G))), gy = y => Math.max(0, Math.min(H - 1, Math.round((y - y0) / G)));
     const rect = (rx, ry, rw, rh, pad) => { for (let j = gy(ry - pad); j <= gy(ry + rh + pad); j++) for (let i = gx(rx - pad); i <= gx(rx + rw + pad); i++) block[j * W + i] = 1; };
     rect(BX, BY, b.w, b.h, 6);
-    for (const c of comps){ if (c.type === 'bb') continue; const d = DEFS[c.type], top = d.fam === 'amod' ? -40 : 0; rect(c.x, c.y + top, d.w, d.h - top, 6); }
+    for (const c of comps){ if (c.type === 'bb') continue; const d = DEFS[c.type], top = d.fam === 'amod' ? -40 : 0, r = compRect(c, 0, top, d.w, d.h - top); rect(r.x, r.y, r.w, r.h, 6); }
     const markLine = (a, z) => { const n = Math.max(1, Math.ceil(Math.hypot(z.x - a.x, z.y - a.y) / (G / 2))); let last = -1; for (let k = 0; k <= n; k++){ const c = gy(a.y + (z.y - a.y) * k / n) * W + gx(a.x + (z.x - a.x) * k / n); if (c !== last){ used[c] += 1; last = c; } } };
     const todo = wires.filter(w => !w.manual && (!onlyIds || onlyIds.includes(w.id)));
     for (const w of wires) if (!todo.includes(w) && w.pts?.length){ const Pp = wirePts(w); if (Pp) for (let i = 1; i < Pp.length; i++) markLine(Pp[i - 1], Pp[i]); }
@@ -5179,7 +5233,7 @@ function drawComp(c, v){
   }
   const hit = `<rect x="-4" y="-4" width="${d.w + 8}" height="${d.h + 4}" fill="transparent"/>`;
   const box = sel ? `<rect x="-9" y="-14" width="${d.w + 18}" height="${d.h + 22}" rx="7" fill="#3ddc970d" stroke="#3ddc97" stroke-dasharray="5 4" stroke-width="1.6"/>` : '';
-  return `<g data-comp="${c.id}" transform="translate(${c.x} ${c.y})" style="cursor:move">${box}<g filter="url(#shadow)">${hit}${s}</g></g>`;
+  return `<g data-comp="${c.id}" transform="translate(${c.x} ${c.y}) ${rotTransform(c)}" style="cursor:move">${box}<g filter="url(#shadow)">${hit}${s}</g></g>`;
 }
 
 function pinsSvg(){
@@ -5197,7 +5251,7 @@ function pinsSvg(){
     if (running && p.kind === 'gpio' && pins[p.num]?.mode === 'OUTPUT') ex = pins[p.num].level ? 'hi' : 'lo';
     s += one('B.' + p.id, pos.x, pos.y, p.label, ex);
   }
-  for (const c of comps){ if (c.type === 'bb') continue; for (const p of DEFS[c.type].pins) s += one(c.id + '.' + p.id, c.x + p.x, c.y + p.y, p.label); }
+  for (const c of comps){ if (c.type === 'bb') continue; for (const p of DEFS[c.type].pins){ const q = pinXY(c, p); s += one(c.id + '.' + p.id, q.x, q.y, p.label); } }
   return s;
 }
 const DEFS_SVG = `<defs>
@@ -5295,8 +5349,9 @@ function renderInspector(){
   if (c.type === 'sd') h += `<label>Files on the card</label><div id="sdfiles">${sdFilesHtml(c)}</div><div class="row" style="margin-top:4px"><button class="btn sm danger" id="sdfmt">Format card</button></div>`;
   if (c.type === 'bb') h += `<div class="note" style="margin-top:6px">In each column, holes a–e are connected, and so are f–j. The + and − rails run the full length. LEDs, resistors, buttons, transistors, tilt switches and the DS18B20 snap straight into the holes.</div>`;
   h += `<div class="live" id="live">—</div><div class="note" style="margin-top:8px">${c.type === 'bb' ? '' : d.pins.map(p => esc(p.label)).join(' · ')}</div>
-        <div class="row"><button class="btn sm danger" id="del">Delete part</button></div>`;
+        <div class="row">${ROTATABLE(c) ? `<button class="btn sm" id="rotL" title="Rotate 90° counter-clockwise (Shift+R)">⟲ Rotate</button><button class="btn sm" id="rotR" title="Rotate 90° clockwise (R)">Rotate ⟳</button>` : ''}<button class="btn sm danger" id="del">Delete part</button></div>`;
   el.innerHTML = h;
+  if (ROTATABLE(c)){ $('rotL').onclick = () => turnSelected(-1); $('rotR').onclick = () => turnSelected(1); }
   el.querySelectorAll('[data-k]').forEach(inp => {
     const ct = d.controls.find(x => x.k === inp.dataset.k);
     inp.oninput = inp.onchange = () => {
@@ -5370,6 +5425,12 @@ function pinLabel(pid){
   const [cid, p] = pid.split('.'); const c = comps.find(x => x.id === cid);
   return c ? DEFS[c.type].pins.find(q => q.id === p)?.label || pid : pid;
 }
+function turnSelected(dir){
+  if (selected?.kind !== 'comp') return;
+  const c = comps.find(x => x.id === selected.id); if (!c || !ROTATABLE(c)) return;
+  if (layoutLocked()){ lockNote(); return; }
+  rotateComp(c, dir); bump(); save();
+}
 function deleteSelected(){
   if (!selected) return;
   if (layoutLocked()){ lockNote(); return; }
@@ -5386,7 +5447,7 @@ function toWorld(e){ const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e
 function zoomAt(p, k){ const nw = Math.max(320, Math.min(5000, vb.w * k)), f = nw / vb.w; vb.x = p.x - (p.x - vb.x) * f; vb.y = p.y - (p.y - vb.y) * f; vb.w = nw; vb.h *= f; applyVB(); }
 function fit(){
   const b = B(); let x0 = BX - 40, y0 = BY - 40, x1 = BX + b.w + 40, y1 = BY + b.h + 40;
-  for (const c of comps){ const d = DEFS[c.type]; x0 = Math.min(x0, c.x - 30); y0 = Math.min(y0, c.y - 40); x1 = Math.max(x1, c.x + d.w + 30); y1 = Math.max(y1, c.y + d.h + 40); }
+  for (const c of comps){ const r = compRect(c); x0 = Math.min(x0, r.x - 30); y0 = Math.min(y0, r.y - 40); x1 = Math.max(x1, r.x + r.w + 30); y1 = Math.max(y1, r.y + r.h + 40); }
   const r = svg.clientWidth / Math.max(1, svg.clientHeight) || 1.5; let w = x1 - x0, h = y1 - y0;
   if (w / h < r){ const nw = h * r; x0 -= (nw - w) / 2; w = nw; } else { const nh = w / r; y0 -= (nh - h) / 2; h = nh; }
   vb = {x:x0, y:y0, w, h}; applyVB();
@@ -5449,7 +5510,7 @@ svg.addEventListener('pointerdown', e => {
     const c = comps.find(x => x.id === t.dataset.comp);
     if (selected?.id !== c.id){ selected = {kind:'comp', id: c.id}; renderInspector(); }
     if (layoutLocked()){ lockDrag = {sx: p.x, sy: p.y}; return; }
-    drag = {c, dx: p.x - c.x, dy: p.y - c.y, carry: c.type !== 'bb' ? [] : comps.filter(o => o.type !== 'bb' && DEFS[o.type].pins.some(q => { const h = nearestHole(c, o.x + q.x, o.y + q.y); return h && h.d < 1.5; })).map(o => ({o, dx: o.x - c.x, dy: o.y - c.y}))};
+    drag = {c, dx: p.x - c.x, dy: p.y - c.y, carry: c.type !== 'bb' ? [] : comps.filter(o => o.type !== 'bb' && DEFS[o.type].pins.some(q => { const w = pinXY(o, q), h = nearestHole(c, w.x, w.y); return h && h.d < 1.5; })).map(o => ({o, dx: o.x - c.x, dy: o.y - c.y}))};
   }
 });
 svg.addEventListener('pointermove', e => {
@@ -5497,6 +5558,7 @@ document.addEventListener('keydown', e => {
   if (['TEXTAREA','INPUT','SELECT'].includes(e.target.tagName)) return;
   if (e.key === 'Escape'){ pending = null; selected = null; renderInspector(); }
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected){ e.preventDefault(); deleteSelected(); }
+  if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey && selected?.kind === 'comp'){ e.preventDefault(); turnSelected(e.shiftKey ? -1 : 1); }
 });
 
 /* palette */
@@ -7290,7 +7352,7 @@ const PY_TOK = /(#[^\n]*)|([rRbBfF]{0,2}(?:"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.
 
 /* ═══════════════════ Persistence ═══════════════════ */
 let saveT = null;
-function save(){ clearTimeout(saveT); saveT = setTimeout(() => { if (keepTidy && !routing && !wdrag && !drag && geoKey() !== lastGeo){ autoRoute(); return; } try { localStorage.setItem('mcusim.v2', JSON.stringify({comps: comps.map(({id, type, x, y, props, burnt}) => ({id, type, x, y, props, burnt})), wires, nid, board: boardKey, lang: LANG, code: LANG === 'cpp' ? $('code').value : (CODEBUF.cpp ?? DEFAULT_CODE), py: LANG === 'py' ? $('code').value : CODEBUF.py})); } catch(e){} }, 300); }
+function save(){ clearTimeout(saveT); saveT = setTimeout(() => { if (keepTidy && !routing && !wdrag && !drag && geoKey() !== lastGeo){ autoRoute(); return; } try { localStorage.setItem('mcusim.v2', JSON.stringify({comps: comps.map(({id, type, x, y, turn, props, burnt}) => ({id, type, x, y, turn, props, burnt})), wires, nid, board: boardKey, lang: LANG, code: LANG === 'cpp' ? $('code').value : (CODEBUF.cpp ?? DEFAULT_CODE), py: LANG === 'py' ? $('code').value : CODEBUF.py})); } catch(e){} }, 300); }
 function load(){
   try {
     const d = JSON.parse(localStorage.getItem('mcusim.v2') || localStorage.getItem('mcusim.v1') || 'null');
@@ -7435,7 +7497,7 @@ function init3D(){
 }
 function aimBench(){
   const b = B(); let x0 = BX, z0 = BY, x1 = BX + b.w, z1 = BY + b.h;
-  for (const c of comps){ const d = DEFS[c.type]; x0 = Math.min(x0, c.x); z0 = Math.min(z0, c.y); x1 = Math.max(x1, c.x + d.w); z1 = Math.max(z1, c.y + d.h); }
+  for (const c of comps){ const r = compRect(c); x0 = Math.min(x0, r.x); z0 = Math.min(z0, r.y); x1 = Math.max(x1, r.x + r.w); z1 = Math.max(z1, r.y + r.h); }
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, span = Math.max(x1 - x0, z1 - z0);
   V3.ctl.target.set(cx, 0, cz); V3.cam.position.set(cx - span * .1, span * .6 + 250, cz + span * .75 + 250);
   V3.sun.target.position.set(cx, 0, cz); V3.sun.position.set(cx - 500, 1800, cz + 900);
@@ -7651,7 +7713,7 @@ function buildPart(c){
   g.traverse(o => { o.userData.cid = c.id; });
   return e;
 }
-function partBase(c){ return c.type !== 'bb' && DEFS[c.type].pins.some(p => bbHoleAt(c.x + p.x, c.y + p.y)) ? 12 : 0; }
+function partBase(c){ return c.type !== 'bb' && DEFS[c.type].pins.some(p => { const q = pinXY(c, p); return bbHoleAt(q.x, q.y); }) ? 12 : 0; }
 function syncBench(){
   V3.bench.visible = true; if (V3.arena) V3.arena.visible = false;
   const b = B();
@@ -7663,7 +7725,8 @@ function syncBench(){
     seen.add(c.id);
     let e = V3.parts.get(c.id); const key = c.type + ':' + (c.props.count || '');
     if (!e || e.key !== key){ if (e) disposeObj(e.grp); e = buildPart(c); e.key = key; V3.parts.set(c.id, e); V3.bench.add(e.grp); }
-    e.grp.position.set(c.x, partBase(c), c.y);
+    { const t = (c.turn || 0) & 3, d = DEFS[c.type], o = [[0, 0], [d.h, 0], [d.w, d.h], [0, d.w]][t];
+      e.grp.position.set(c.x + o[0], partBase(c), c.y + o[1]); e.grp.rotation.y = -t * Math.PI / 2; }
     e.update(c, vis[c.id] || {});
   }
   for (const [id, e] of V3.parts) if (!seen.has(id)){ disposeObj(e.grp); V3.parts.delete(id); }
@@ -7704,7 +7767,7 @@ function pick3D(e){
   const hits = V3.ray.intersectObjects(V3.bench.children, true).filter(h => h.object.visible && h.object.userData.cid); if (!hits.length) return;
   const h = hits[0], c = comps.find(x => x.id === h.object.userData.cid); if (!c) return;
   if (c.type === 'keypad'){
-    const col = Math.floor((h.point.x - c.x - 7) / 25), row = Math.floor((h.point.z - c.y - 7) / 28);
+    const L = toLocal(c, h.point.x, h.point.z), col = Math.floor((L.x - 7) / 25), row = Math.floor((L.y - 7) / 28);
     if (row >= 0 && row < 4 && col >= 0 && col < 4){ c.keyDown = [row, col]; keyQueue.push({id: c.id, r: row, c: col}); obs.keys.push(KP[row][col]); bump(); V3.release = () => { c.keyDown = null; }; V3.ctl.enabled = false; return; }
   }
   if (h.object.userData.press){ V3.release = pressPart(c); V3.ctl.enabled = false; if (selected?.id === c.id) renderInspector(); return; }

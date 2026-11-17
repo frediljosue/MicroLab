@@ -43,6 +43,7 @@ Switch the board to **Raspberry Pi Pico** (or an ESP32), then press **MicroPytho
 
 ## Tips
 
+- Select a part and press **R** to rotate it 90° clockwise (**Shift+R** for counter-clockwise), or use the Rotate buttons in the Inspector.
 - **Tidy wires** routes every wire neatly. **Keep tidy** re-routes as you move parts.
 - Hover any pin to see its name and live voltage.
 - **Boards** and **Parts** open the reference library with specs, pinouts and common mistakes.
