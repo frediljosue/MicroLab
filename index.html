@@ -5666,7 +5666,7 @@ function setBoard(k){
   wires = wires.filter(w => [w.a, w.b].every(p => !p.startsWith('B.') || BOARDS[k].byId.has(p.slice(2))));
   boardKey = k; BT.pin = null; if (V3.board) V3.board.key = null; pending = null;
   if (LANG === 'py' && !mpOk()){ setLang('cpp', true); warn('mpboard', `MicroPython doesn't run on the ${BOARDS[k].name}, so the editor switched to Arduino C++. Your Python code is kept.`, 'info'); }
-  bump(); save(); renderBoardSeg(); renderBoardTab(); setRunUI(); try { renderLangUI(); } catch(e){}
+  bump(); save(); renderBoardSeg(); renderBoardTab(); setRunUI(); try { renderLangUI(); renderChallenges(); } catch(e){}
 }
 const BT = {pin:null, role:null};
 function renderBoardTab(){
@@ -7262,37 +7262,37 @@ const CH = [
     tips:['Pin → resistor → LED long leg (+). LED short leg (−) → GND.','Without a resistor the LED burns out.'],
     check: H => anyLed(H, b => toggles(b) >= 6),
     sol:{ comps:[['res',700,250],['led',820,180]], wires:W(['B.D13','#0.1'],['#0.2','#1.A'],['#1.K','B.GND1']),
-      code:`void setup() {\n  pinMode(13, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(13, HIGH);\n  delay(400);\n  digitalWrite(13, LOW);\n  delay(400);\n}\n` } },
+      code:`void setup() {\n  pinMode(«13», OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(«13», HIGH);\n  delay(400);\n  digitalWrite(«13», LOW);\n  delay(400);\n}\n` } },
   { id:'button', lvl:'Starter', title:'Button lamp', goal:'The LED is on only while the button is held.', parts:['Push button','LED','220 Ω resistor'],
     tips:['Easiest: pinMode(2, INPUT_PULLUP) with the button between D2 and GND. Pressed reads LOW.','Without a pull-up or pull-down the pin floats.'],
     check: H => anyLed(H, (b, id) => { let a = 0, z = 0, bad = 0; H.forEach(s => { const l = s.leds[id] || 0; if (s.pressed){ l > .3 ? a++ : bad++; } else { l < .05 ? z++ : bad++; } }); return a >= 8 && z >= 8 && bad < .2 * (a + z); }),
     sol:{ comps:[['button',700,560],['res',720,250],['led',840,180]], wires:W(['#0.1','B.D2'],['#0.2','B.GND3'],['B.D13','#1.1'],['#1.2','#2.A'],['#2.K','B.GND1']),
-      code:`const int BTN = 2;\nconst int LED = 13;\n\nvoid setup() {\n  pinMode(BTN, INPUT_PULLUP);\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  // With INPUT_PULLUP, pressed = LOW\n  if (digitalRead(BTN) == LOW) {\n    digitalWrite(LED, HIGH);\n  } else {\n    digitalWrite(LED, LOW);\n  }\n}\n` } },
+      code:`const int BTN = «2»;\nconst int LED = «13»;\n\nvoid setup() {\n  pinMode(BTN, INPUT_PULLUP);\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  // With INPUT_PULLUP, pressed = LOW\n  if (digitalRead(BTN) == LOW) {\n    digitalWrite(LED, HIGH);\n  } else {\n    digitalWrite(LED, LOW);\n  }\n}\n` } },
   { id:'fade', lvl:'Starter', title:'Breathing LED (PWM)', goal:'Fade an LED smoothly up and down with analogWrite.', parts:['LED','220 Ω resistor'],
     tips:['On the Uno only ~ pins fade: 3, 5, 6, 9, 10, 11. On the ESP32 and Pico, any output pin works.','analogWrite(pin, 0…255) sets the duty cycle.'],
     check: H => anyLed(H, b => new Set(b.filter(x => x > .05 && x < .95).map(x => Math.round(x * 20))).size >= 6),
     sol:{ comps:[['res',700,250],['led',820,180]], wires:W(['B.D9','#0.1'],['#0.2','#1.A'],['#1.K','B.GND1']),
-      code:`const int LED = 9; // PWM pin\n\nvoid setup() {\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 5) {\n    analogWrite(LED, v);\n    delay(15);\n  }\n  for (int v = 255; v >= 0; v -= 5) {\n    analogWrite(LED, v);\n    delay(15);\n  }\n}\n` } },
+      code:`const int LED = «9»; // PWM pin\n\nvoid setup() {\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 5) {\n    analogWrite(LED, v);\n    delay(15);\n  }\n  for (int v = 255; v >= 0; v -= 5) {\n    analogWrite(LED, v);\n    delay(15);\n  }\n}\n` } },
   { id:'potservo', lvl:'Core', title:'Knob-controlled servo', goal:'Turn the potentiometer and the servo follows across at least 90°.', parts:['Potentiometer','Servo'],
     tips:['Pot: outer legs to 5V and GND, middle wiper to A0.','map(analogRead(A0), 0, 1023, 0, 180) turns the reading into an angle.','Servo red wire → 5V, never a GPIO.'],
     check: H => { const p = H.filter(s => s.pot != null && s.servo != null && s.settled); if (new Set(p.map(s => Math.round(s.pot * 10))).size < 3) return false; const xs = p.map(s => s.pot), ys = p.map(s => s.servo); return Math.max(...ys) - Math.min(...ys) >= 90 && corr(xs, ys) > .9; },
     sol:{ comps:[['pot',700,560],['servo',860,560]], wires:W(['#0.VCC','B.5V'],['#0.GND','B.GND2'],['#0.OUT','B.A0'],['#1.GND','B.GND3'],['#1.VCC','B.5V'],['#1.SIG','B.D9']),
-      code:`#include <Servo.h>\nServo arm;\n\nvoid setup() {\n  arm.attach(9);\n}\n\nvoid loop() {\n  int raw = analogRead(A0);\n  int angle = map(raw, 0, 1023, 0, 180);\n  arm.write(angle);\n  delay(20);\n}\n` } },
+      code:`#include <Servo.h>\nServo arm;\n\nvoid setup() {\n  arm.attach(«9»);\n}\n\nvoid loop() {\n  int raw = analogRead(«A0»);\n  int angle = map(raw, 0, «MAX», 0, 180);\n  arm.write(angle);\n  delay(20);\n}\n` } },
   { id:'night', lvl:'Core', title:'Automatic night light', goal:'The LED turns on when it\'s dark (light below 30%) and off when bright (above 70%).', parts:['Light sensor','LED','220 Ω resistor'],
     tips:['The module\'s AO pin goes to an analog pin.','Pick a threshold, then move the light slider to test.'],
     check: H => anyLed(H, (b, id) => { let on = 0, off = 0, bad = 0; H.forEach(s => { if (s.light == null) return; const l = s.leds[id] || 0; if (s.light < .3 && l > .3) on++; if (s.light > .7){ l < .05 ? off++ : bad++; } }); return on >= 8 && off >= 8 && bad <= 3; }),
     sol:{ comps:[['ldr',700,560],['res',720,250],['led',840,180]], wires:W(['#0.VCC','B.5V'],['#0.GND','B.GND2'],['#0.AO','B.A0'],['B.D13','#1.1'],['#1.2','#2.A'],['#2.K','B.GND1']),
-      code:`void setup() {\n  pinMode(13, OUTPUT);\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int light = analogRead(A0);\n  Serial.println(light);\n  if (light < 400) digitalWrite(13, HIGH);\n  else digitalWrite(13, LOW);\n  delay(100);\n}\n` } },
+      code:`void setup() {\n  pinMode(«13», OUTPUT);\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int light = analogRead(«A0»);\n  Serial.println(light);\n  if (light < «ADC400») digitalWrite(«13», HIGH);\n  else digitalWrite(«13», LOW);\n  delay(100);\n}\n` } },
   { id:'parking', lvl:'Core', title:'Parking sensor', goal:'The buzzer sounds when an object is closer than 20 cm and stays quiet beyond 50 cm.', parts:['HC-SR04','Piezo buzzer'],
     tips:['Send a 10 µs pulse on TRIG, then call pulseIn(ECHO, HIGH).','distance (cm) = duration ÷ 58','Use tone(pin, 1000) and noTone(pin).'],
     check: H => { let on = 0, off = 0, bad = 0; H.forEach(s => { if (s.dist == null) return; if (s.dist < 20 && s.buzz) on++; if (s.dist > 50){ s.buzz ? bad++ : off++; } }); return on >= 8 && off >= 8 && bad <= 3; },
     sol:{ comps:[['hc',700,560],['buzzer',900,560]], wires:W(['#0.VCC','B.5V'],['#0.GND','B.GND2'],['#0.TRIG','B.D9'],['#0.ECHO','B.D10'],['#1.P','B.D8'],['#1.N','B.GND3']),
-      code:`const int TRIG = 9, ECHO = 10, BUZ = 8;\n\nvoid setup() {\n  pinMode(TRIG, OUTPUT);\n  pinMode(ECHO, INPUT);\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long dur = pulseIn(ECHO, HIGH);\n  float cm = dur / 58.0;\n  Serial.println(cm);\n  if (cm > 0 && cm < 20) tone(BUZ, 1000);\n  else noTone(BUZ);\n  delay(60);\n}\n` } },
+      code:`const int TRIG = «9», ECHO = «10», BUZ = «8»;\n\nvoid setup() {\n  pinMode(TRIG, OUTPUT);\n  pinMode(ECHO, INPUT);\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long dur = pulseIn(ECHO, HIGH);\n  float cm = dur / 58.0;\n  Serial.println(cm);\n  if (cm > 0 && cm < 20) tone(BUZ, 1000);\n  else noTone(BUZ);\n  delay(60);\n}\n` } },
   { id:'thermo', lvl:'Core', title:'Serial thermometer', goal:'Print the TMP36 temperature in °C to Serial. It must match at 2 temperatures at least 5 °C apart.', parts:['TMP36'],
     tips:['voltage = reading × 5.0 ÷ 1023','°C = (voltage − 0.5) × 100','Print one value per line with Serial.println.'],
     check: () => { const t = [...obs.temps]; return t.length >= 2 && Math.max(...t) - Math.min(...t) >= 5; },
     sol:{ comps:[['tmp',720,560]], wires:W(['#0.VS','B.5V'],['#0.GND','B.GND2'],['#0.OUT','B.A0']),
-      code:`void setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int raw = analogRead(A0);\n  float volts = raw * 5.0 / 1023.0;\n  float tempC = (volts - 0.5) * 100.0;\n  Serial.print("Temp: ");\n  Serial.println(tempC);\n  delay(500);\n}\n` } },
+      code:`void setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int raw = analogRead(«A0»);\n  float volts = raw * «VREF» / «MAX».0;\n  float tempC = (volts - 0.5) * 100.0;\n  Serial.print("Temp: ");\n  Serial.println(tempC);\n  delay(500);\n}\n` } },
   { id:'traffic', lvl:'Core', title:'Traffic light', goal:'Red → green → yellow → red with three LEDs, one on at a time.', parts:['3 LEDs','3 × 220 Ω resistors'],
     tips:['Give each LED its own pin and its own resistor.'], check: H => trafficCheck(H), sol:null },
   { id:'lcd', lvl:'Display', title:'Hello, LCD', goal:'Show a "Hello" message on row 1 and a counter that keeps changing on row 2.', parts:['LCD 16×2 I²C'],
@@ -7304,18 +7304,18 @@ const CH = [
     tips:['#include <DHT.h> then DHT dht(2, DHT11); and call dht.begin().','dht.readTemperature() and dht.readHumidity() return floats.','Clear old digits by printing a few spaces after the value.'],
     check: () => obs.wx.size >= 2,
     sol:{ comps:[['dht',700,560],['lcd',760,120]], wires:W(['#0.VCC','B.5V'],['#0.GND','B.GND2'],['#0.DATA','B.D2'],['#1.GND','B.GND3'],['#1.VCC','B.5V'],['#1.SDA','B.A4'],['#1.SCL','B.A5']),
-      code:`#include <DHT.h>\n#include <LiquidCrystal_I2C.h>\n\nDHT dht(2, DHT11);\nLiquidCrystal_I2C lcd(0x27, 16, 2);\n\nvoid setup() {\n  dht.begin();\n  lcd.init();\n  lcd.backlight();\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  lcd.setCursor(0, 0);\n  lcd.print("Temp: ");\n  lcd.print(t, 0);\n  lcd.print((char)223);\n  lcd.print("C   ");\n  lcd.setCursor(0, 1);\n  lcd.print("Hum:  ");\n  lcd.print(h, 0);\n  lcd.print("%   ");\n  delay(1000);\n}\n` } },
+      code:`#include <DHT.h>\n#include <LiquidCrystal_I2C.h>\n\nDHT dht(«2», DHT11);\nLiquidCrystal_I2C lcd(0x27, 16, 2);\n\nvoid setup() {\n  dht.begin();\n  lcd.init();\n  lcd.backlight();\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  lcd.setCursor(0, 0);\n  lcd.print("Temp: ");\n  lcd.print(t, 0);\n  lcd.print((char)223);\n  lcd.print("C   ");\n  lcd.setCursor(0, 1);\n  lcd.print("Hum:  ");\n  lcd.print(h, 0);\n  lcd.print("%   ");\n  delay(1000);\n}\n` } },
   { id:'motor', lvl:'Motion', title:'Joystick motor control', goal:'Push the joystick up for forward, down for reverse, and center to stop.', parts:['Joystick','L298N driver','DC motor'],
     tips:['Never wire a motor to a GPIO pin. The L298N switches the current.','IN1/IN2 set the direction, and PWM on ENA sets the speed.','Add a dead zone around the center so the motor really stops.'],
     check: H => { const j = H.filter(s => s.joyY != null && s.motor != null); const up = j.filter(s => s.joyY < .2).map(s => s.motor), dn = j.filter(s => s.joyY > .8).map(s => s.motor), mid = j.filter(s => s.joyY > .4 && s.joyY < .6).map(s => Math.abs(s.motor));
       return up.length >= 8 && dn.length >= 8 && mid.length >= 8 && Math.abs(mean(up)) > .5 && Math.abs(mean(dn)) > .5 && Math.sign(mean(up)) !== Math.sign(mean(dn)) && mean(mid.slice(-8)) < .15; },
     sol:{ comps:[['joy',700,540],['l298n',860,540],['motor',900,330]], wires:W(['#0.GND','B.GND2'],['#0.VCC','B.5V'],['#0.VRY','B.A1'],['#1.VM','B.5V'],['#1.GND','B.GND3'],['#1.ENA','B.D10'],['#1.IN1','B.D9'],['#1.IN2','B.D8'],['#1.OUT1','#2.M1'],['#1.OUT2','#2.M2']),
-      code:`const int ENA = 10, IN1 = 9, IN2 = 8;\n\nvoid setup() {\n  pinMode(ENA, OUTPUT);\n  pinMode(IN1, OUTPUT);\n  pinMode(IN2, OUTPUT);\n}\n\nvoid loop() {\n  int y = analogRead(A1);           // 0 = up, 1023 = down\n  int speed = map(y, 0, 1023, 255, -255);\n  if (abs(speed) < 30) speed = 0;   // dead zone\n\n  if (speed > 0) {\n    digitalWrite(IN1, HIGH);\n    digitalWrite(IN2, LOW);\n  } else if (speed < 0) {\n    digitalWrite(IN1, LOW);\n    digitalWrite(IN2, HIGH);\n  } else {\n    digitalWrite(IN1, LOW);\n    digitalWrite(IN2, LOW);\n  }\n  analogWrite(ENA, abs(speed));\n  delay(20);\n}\n` } },
+      code:`const int ENA = «10», IN1 = «9», IN2 = «8»;\n\nvoid setup() {\n  pinMode(ENA, OUTPUT);\n  pinMode(IN1, OUTPUT);\n  pinMode(IN2, OUTPUT);\n}\n\nvoid loop() {\n  int y = analogRead(«A1»);           // 0 = up, «MAX» = down\n  int speed = map(y, 0, «MAX», 255, -255);\n  if (abs(speed) < 30) speed = 0;   // dead zone\n\n  if (speed > 0) {\n    digitalWrite(IN1, HIGH);\n    digitalWrite(IN2, LOW);\n  } else if (speed < 0) {\n    digitalWrite(IN1, LOW);\n    digitalWrite(IN2, HIGH);\n  } else {\n    digitalWrite(IN1, LOW);\n    digitalWrite(IN2, LOW);\n  }\n  analogWrite(ENA, abs(speed));\n  delay(20);\n}\n` } },
   { id:'alarm', lvl:'Motion', title:'Motion-activated lamp', goal:'Motion turns on a lamp through a relay. No motion means the lamp is off.', parts:['PIR motion','Relay module','Lamp'],
     tips:['The lamp needs real current: 5V → relay COM, relay NO → lamp → GND.','The pin only drives the relay\'s IN.','Click the PIR dome to wave a hand at it.'],
     check: H => { let on = 0, off = 0; H.forEach(s => { if (s.motion == null || s.lamp == null) return; if (s.motion && s.lamp > .5) on++; if (!s.motion && s.lamp < .1) off++; }); return on >= 8 && off >= 8; },
     sol:{ comps:[['pir',700,560],['relay',860,560],['lamp',920,280]], wires:W(['#0.VCC','B.5V'],['#0.GND','B.GND2'],['#0.OUT','B.D2'],['#1.VCC','B.5V'],['#1.GND','B.GND3'],['#1.IN','B.D7'],['#1.COM','B.5V'],['#1.NO','#2.1'],['#2.2','B.GND1']),
-      code:`const int PIR = 2, RELAY = 7;\n\nvoid setup() {\n  pinMode(PIR, INPUT);\n  pinMode(RELAY, OUTPUT);\n}\n\nvoid loop() {\n  if (digitalRead(PIR) == HIGH) {\n    digitalWrite(RELAY, HIGH);\n  } else {\n    digitalWrite(RELAY, LOW);\n  }\n  delay(50);\n}\n` } },
+      code:`const int PIR = «2», RELAY = «7»;\n\nvoid setup() {\n  pinMode(PIR, INPUT);\n  pinMode(RELAY, OUTPUT);\n}\n\nvoid loop() {\n  if (digitalRead(PIR) == HIGH) {\n    digitalWrite(RELAY, HIGH);\n  } else {\n    digitalWrite(RELAY, LOW);\n  }\n  delay(50);\n}\n` } },
   { id:'oled', lvl:'Display', title:'OLED dashboard', goal:'Draw text and a graphic on the OLED that keeps updating.', parts:['OLED 128×64 I²C'],
     tips:['Adafruit_SSD1306 display(128, 64, &Wire, -1); then display.begin(SSD1306_SWITCHCAPVCC, 0x3C).','Draw into the buffer, then call display.display() to show it.','Clear with display.clearDisplay() at the start of each frame.'],
     check: H => { const o = H.filter(s => s.oled && s.oled.lit >= 60); return new Set(o.map(s => s.oled.h)).size >= 3; },
@@ -7326,23 +7326,23 @@ const CH = [
     check: H => { const n = H.filter(s => s.neo && s.neo.filter(x => x).length >= 5); const hues = s => new Set(s.neo.filter(x => x).map(c => { const r = c >> 16 & 255, g = c >> 8 & 255, b = c & 255; return r >= g && r >= b ? 'r' : g >= b ? 'g' : 'b'; })).size;
       return n.some(s => hues(s) >= 3) && new Set(n.map(s => s.neo.join())).size >= 5; },
     sol:{ comps:[['neo',720,120]], wires:W(['#0.VCC','B.5V'],['#0.GND','B.GND2'],['#0.DIN','B.D6']),
-      code:`#include <Adafruit_NeoPixel.h>\n#define PIN 6\n#define NUM 8\n\nAdafruit_NeoPixel strip(NUM, PIN, NEO_GRB + NEO_KHZ800);\nlong hue = 0;\n\nvoid setup() {\n  strip.begin();\n  strip.setBrightness(80);\n}\n\nvoid loop() {\n  for (int i = 0; i < NUM; i++) {\n    strip.setPixelColor(i, strip.ColorHSV(hue + i * 65536L / NUM));\n  }\n  strip.show();\n  hue += 1024;\n  delay(30);\n}\n` } },
+      code:`#include <Adafruit_NeoPixel.h>\n#define PIN «6»\n#define NUM 8\n\nAdafruit_NeoPixel strip(NUM, PIN, NEO_GRB + NEO_KHZ800);\nlong hue = 0;\n\nvoid setup() {\n  strip.begin();\n  strip.setBrightness(80);\n}\n\nvoid loop() {\n  for (int i = 0; i < NUM; i++) {\n    strip.setPixelColor(i, strip.ColorHSV(hue + i * 65536L / NUM));\n  }\n  strip.show();\n  hue += 1024;\n  delay(30);\n}\n` } },
   { id:'keypad', lvl:'Input', title:'Keypad to Serial', goal:'Print every key you press on the 4×4 keypad to Serial. Press at least 4 different keys.', parts:['4×4 keypad'],
     tips:['#include <Keypad.h> and describe the keys in a 4×4 char array.','R1–R4 and C1–C4 must match rowPins and colPins in order.','keypad.getKey() returns NO_KEY when nothing is pressed.'],
     check: () => { const k = [...new Set(obs.keys)]; return k.length >= 4 && k.every(x => obs.serial.includes(x)); },
     sol:{ comps:[['keypad',720,430]], wires:W(['#0.R1','B.D9'],['#0.R2','B.D8'],['#0.R3','B.D7'],['#0.R4','B.D6'],['#0.C1','B.D5'],['#0.C2','B.D4'],['#0.C3','B.D3'],['#0.C4','B.D2']),
-      code:`#include <Keypad.h>\n\nconst byte ROWS = 4;\nconst byte COLS = 4;\nchar keys[ROWS][COLS] = {\n  {'1','2','3','A'},\n  {'4','5','6','B'},\n  {'7','8','9','C'},\n  {'*','0','#','D'}\n};\nbyte rowPins[ROWS] = {9, 8, 7, 6};\nbyte colPins[COLS] = {5, 4, 3, 2};\nKeypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  char key = keypad.getKey();\n  if (key) {\n    Serial.print("Key: ");\n    Serial.println(key);\n  }\n}\n` } },
+      code:`#include <Keypad.h>\n\nconst byte ROWS = 4;\nconst byte COLS = 4;\nchar keys[ROWS][COLS] = {\n  {'1','2','3','A'},\n  {'4','5','6','B'},\n  {'7','8','9','C'},\n  {'*','0','#','D'}\n};\nbyte rowPins[ROWS] = {«9», «8», «7», «6»};\nbyte colPins[COLS] = {«5», «4», «3», «2»};\nKeypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  char key = keypad.getKey();\n  if (key) {\n    Serial.print("Key: ");\n    Serial.println(key);\n  }\n}\n` } },
   { id:'transistor', lvl:'Motion', title:'Transistor motor switch', goal:'Switch a DC motor on and off every second with an NPN transistor.', parts:['NPN transistor','1 kΩ resistor','DC motor'],
     tips:['Pin → 1 kΩ → Base. Emitter → GND.','Motor between 5V and the Collector. The transistor switches the motor\'s GND side.','The pin never touches the motor current.'],
     check: H => { let on = 0, off = 0; H.forEach(s => { if (s.npnOn == null || s.motor == null) return; if (s.npnOn && s.motor > .5) on++; if (!s.npnOn && s.motor < .05) off++; }); return on >= 8 && off >= 8; },
     sol:{ comps:[['res',700,250,{ohms:1000}],['npn',830,240],['motor',900,60]], wires:W(['B.D9','#0.1'],['#0.2','#1.B'],['#1.E','B.GND1'],['#1.C','#2.M2'],['#2.M1','B.5V']),
-      code:`const int MOTOR = 9;\n\nvoid setup() {\n  pinMode(MOTOR, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(MOTOR, HIGH);  // transistor on, motor spins\n  delay(1000);\n  digitalWrite(MOTOR, LOW);   // transistor off, motor stops\n  delay(1000);\n}\n` } },
+      code:`const int MOTOR = «9»;\n\nvoid setup() {\n  pinMode(MOTOR, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(MOTOR, HIGH);  // transistor on, motor spins\n  delay(1000);\n  digitalWrite(MOTOR, LOW);   // transistor off, motor stops\n  delay(1000);\n}\n` } },
   { id:'robot', lvl:'3D', title:'Obstacle-avoiding robot car', goal:'Open 3D view, then Drive mode. Make the car drive 4 m without bumping into anything.', parts:['L298N driver','2 DC motors','HC-SR04','9V battery'],
     tips:['The first DC motor is the left wheel, the second the right. Use Swap in the 3D panel if they\'re mixed up.','Motors run from the battery through the L298N. Connect battery − to Arduino GND too (common ground).','Drive forward. When the sensor reads under ~30 cm, back up a little and turn.'],
     check: H => H.some(s => s.drive && s.drive.dist >= 4000 && s.drive.coll === 0),
     sol:{ comps:[['l298n',700,600],['motor',640,330],['motor',820,330],['hc',960,560],['battery',1100,280]],
       wires:W(['#4.P','#0.VM'],['#4.N','#0.GND'],['#0.GND','B.GND1'],['#0.ENA','B.D5'],['#0.IN1','B.D7'],['#0.IN2','B.D8'],['#0.IN3','B.D9'],['#0.IN4','B.D10'],['#0.ENB','B.D6'],['#0.OUT1','#1.M1'],['#0.OUT2','#1.M2'],['#0.OUT3','#2.M1'],['#0.OUT4','#2.M2'],['#3.VCC','B.5V'],['#3.GND','B.GND2'],['#3.TRIG','B.D11'],['#3.ECHO','B.D12']),
-      code:`// Obstacle-avoiding robot: open 3D view, then Drive mode\nconst int ENA = 5, IN1 = 7, IN2 = 8;   // left motor (L298N channel A)\nconst int ENB = 6, IN3 = 9, IN4 = 10;  // right motor (channel B)\nconst int TRIG = 11, ECHO = 12;\n\nvoid setup() {\n  int outs[] = {ENA, IN1, IN2, ENB, IN3, IN4, TRIG};\n  for (int i = 0; i < 7; i++) pinMode(outs[i], OUTPUT);\n  pinMode(ECHO, INPUT);\n  Serial.begin(9600);\n}\n\nlong distanceCm() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long us = pulseIn(ECHO, HIGH, 30000);\n  return us / 58;   // 0 means nothing in range\n}\n\nvoid drive(int left, int right) {\n  digitalWrite(IN1, left > 0);\n  digitalWrite(IN2, left < 0);\n  digitalWrite(IN3, right > 0);\n  digitalWrite(IN4, right < 0);\n  analogWrite(ENA, abs(left));\n  analogWrite(ENB, abs(right));\n}\n\nvoid loop() {\n  long cm = distanceCm();\n  Serial.println(cm);\n  if (cm > 0 && cm < 30) {\n    drive(-150, -150);  // back up\n    delay(300);\n    drive(180, -180);   // spin right\n    delay(450);\n  } else {\n    drive(200, 200);    // straight ahead\n  }\n  delay(40);\n}\n` } },
+      code:`// Obstacle-avoiding robot: open 3D view, then Drive mode\nconst int ENA = «5», IN1 = «7», IN2 = «8»;   // left motor (L298N channel A)\nconst int ENB = «6», IN3 = «9», IN4 = «10»;  // right motor (channel B)\nconst int TRIG = «11», ECHO = «12»;\n\nvoid setup() {\n  int outs[] = {ENA, IN1, IN2, ENB, IN3, IN4, TRIG};\n  for (int i = 0; i < 7; i++) pinMode(outs[i], OUTPUT);\n  pinMode(ECHO, INPUT);\n  Serial.begin(9600);\n}\n\nlong distanceCm() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long us = pulseIn(ECHO, HIGH, 30000);\n  return us / 58;   // 0 means nothing in range\n}\n\nvoid drive(int left, int right) {\n  digitalWrite(IN1, left > 0);\n  digitalWrite(IN2, left < 0);\n  digitalWrite(IN3, right > 0);\n  digitalWrite(IN4, right < 0);\n  analogWrite(ENA, abs(left));\n  analogWrite(ENB, abs(right));\n}\n\nvoid loop() {\n  long cm = distanceCm();\n  Serial.println(cm);\n  if (cm > 0 && cm < 30) {\n    drive(-150, -150);  // back up\n    delay(300);\n    drive(180, -180);   // spin right\n    delay(450);\n  } else {\n    drive(200, 200);    // straight ahead\n  }\n  delay(40);\n}\n` } },
 ];
 
 /* ── Checker for the Traffic light challenge ──
@@ -7366,17 +7366,92 @@ function renderChallenges(){
   $('chDetail').innerHTML = c ? `<div class="detail"><div class="h">Active challenge</div><b>${esc(c.title)}</b><div style="margin:6px 0">${esc(c.goal)}</div>
     <ul class="note">${c.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
     <div class="note">${completed.has(c.id) ? '<span class="done">✓ Completed</span>' : 'Build it, press Upload & Run, then interact. It checks while running.'}</div>
-    <div class="row">${c.sol ? `<button class="btn sm" id="solBtn">Load solution (Uno, replaces circuit)</button>` : '<span class="note">No solution yet: the checker is still being written.</span>'}</div></div>`
-    : '<div class="note" style="margin-bottom:10px">Pick a challenge. The lab watches your circuit while it runs and marks it done when you meet the goal. Solutions are for the Uno, but you can solve any of them on any board.</div>';
+    <div class="row">${c.sol ? `<button class="btn sm" id="solBtn">Load solution for the ${esc(portSolution(c) ? (B().short || B().name) : 'Uno')} (replaces circuit)</button>` : '<span class="note">No solution yet: the checker is still being written.</span>'}</div></div>`
+    : '<div class="note" style="margin-bottom:10px">Pick a challenge. The lab watches your circuit while it runs and marks it done when you meet the goal. Solutions load for the board you have selected.</div>';
   if ($('solBtn')){ let arm = false; $('solBtn').onclick = () => { if (!arm){ arm = true; $('solBtn').textContent = 'Click again to replace your circuit'; return; } loadSolution(c); }; }
 }
 $('chList').onclick = e => { const el = e.target.closest('[data-ch]'); if (!el) return; activeCh = el.dataset.ch; hist = []; obs = newObs(); renderChallenges(); };
+/* ── Practice solutions on any board ──
+   Solutions are written for the Uno. portSolution() re-maps them to the selected board:
+   · SDA/SCL go to the board's I²C pins, analog inputs to ADC pins (A0/A1 kept when the board defines them)
+   · other pins keep their number when the board has a free, suitable pin with that number, else the next free one
+     (skipping flash, serial, input-only, analog-only and boot-strapping pins)
+   · on 3.3 V boards, sensors run from 3V3; parts that really need 5 V (servo, motor driver, relay…) keep 5 V
+   · «markers» in the code become the new pin numbers and the board's ADC range */
+const NEEDS_5V = new Set(['servo.VCC', 'l298n.VM', 'motor.M1', 'motor.M2', 'relay.VCC', 'relay.COM', 'hc.VCC', 'pir.VCC', 'neo.VCC', 'lcd.VCC']);
+/* An HC-SR04's ECHO pin outputs 5 V. On a 3.3 V board, put a 1 kΩ / 2 kΩ divider between it and the pin (5 V × 2/3 ≈ 3.3 V). */
+function echoDividers(sol){
+  const comps = sol.comps.slice(), wires = [];
+  for (const [x, y] of sol.wires){
+    const [e, pin] = /\.ECHO$/.test(x) && y.startsWith('B.') ? [x, y] : /\.ECHO$/.test(y) && x.startsWith('B.') ? [y, x] : [];
+    const hc = e && comps[+e.slice(1, e.indexOf('.'))];
+    if (!hc || hc[0] !== 'hc'){ wires.push([x, y]); continue; }
+    const r1 = comps.push(['res', hc[1] + 10, hc[2] - 120, {ohms: 1000}]) - 1, r2 = comps.push(['res', hc[1] + 10, hc[2] - 70, {ohms: 2000}]) - 1;
+    wires.push([e, `#${r1}.1`], [`#${r1}.2`, pin], [`#${r2}.1`, pin], [`#${r2}.2`, 'B.GND3']);
+  }
+  return {...sol, comps, wires};
+}
+function portSolution(c, k = boardKey){
+  const b = BOARDS[k]; let sol = c.sol; if (!sol || !b || b.refOnly) return null;
+  if (b.logic < 5) sol = echoDividers(sol);
+  const types = sol.comps.map(x => x[0]);
+  const partPin = ref => { const m = /^#(\d+)\.(.+)$/.exec(ref); return m ? types[+m[1]] + '.' + m[2] : ''; };
+  const p5 = b.pins.find(p => p.kind === '5V' && b.pos.has(p.id)), p33 = b.pins.find(p => p.kind === '3V3' && b.pos.has(p.id));
+  const gnds = b.pins.filter(p => p.kind === 'GND' && b.pos.has(p.id)).map(p => p.id);
+  if (!gnds.length || !(p5 || p33)) return null;
+  // what each Uno pin is used for
+  const roles = new Map();
+  for (const [x, y] of sol.wires) for (const [u, o] of [[x, y], [y, x]]){
+    const m = /^B\.([DA])(\d+)$/.exec(u); if (!m) continue;
+    const n = m[1] === 'D' ? +m[2] : 14 + +m[2], other = partPin(o);
+    roles.set(n, /\.SDA$/.test(other) ? 'sda' : /\.SCL$/.test(other) ? 'scl' : m[1] === 'A' ? 'adc' : UNO_PWM.includes(n) ? 'pwm' : 'io');
+  }
+  const header = b.pins.filter(p => p.kind === 'gpio' && b.pos.has(p.id) && !p.flash && !(b.serialPins || []).includes(p.num));
+  const busy = new Set([b.i2c?.sda, b.i2c?.scl]), map = new Map(), text = new Map();
+  const fits = (p, role) => p && header.includes(p) && !busy.has(p.num) &&
+    (role === 'adc' ? !!p.adc : !p.inOnly && !p.anaOnly && (role !== 'pwm' || b.isPwm(p.num)));
+  const take = (n, p, t) => { busy.add(p.num); map.set(n, p); text.set(n, t ?? String(p.num)); };
+  for (const [n, r] of roles) if (r === 'sda' || r === 'scl'){ const p = b.byNum.get(b.i2c?.[r]); if (!p) return null; map.set(n, p); }
+  for (const [n, r] of roles) if (r === 'adc'){ const a = 'A' + (n - 14), p = b.byNum.get(b.consts?.[a]); if (fits(p, r)) take(n, p, a); }
+  for (const [n, r] of roles) if (!map.has(n) && r !== 'adc'){ const p = b.byNum.get(n); if (fits(p, r) && !p.strap) take(n, p); }
+  const order = [...header].sort((p, q) => !!p.strap - !!q.strap);
+  for (const [n, r] of roles) if (!map.has(n)){ const p = order.find(q => fits(q, r)); if (!p) return null; take(n, p); }
+  const lo = b.logic < 5, gndOf = {GND1: 0, GND2: 1, GND3: 2};
+  const pinRef = (ref, other) => {
+    if (!ref.startsWith('B.')) return ref;
+    const id = ref.slice(2), m = /^([DA])(\d+)$/.exec(id);
+    if (m) return 'B.' + map.get(m[1] === 'D' ? +m[2] : 14 + +m[2]).id;
+    if (id in gndOf) return 'B.' + gnds[gndOf[id] % gnds.length];
+    if (id === '5V') return 'B.' + ((!lo || NEEDS_5V.has(partPin(other))) && p5 ? p5 : p33 || p5).id;
+    return ref;
+  };
+  const wires = sol.wires.map(([x, y]) => [pinRef(x, y), pinRef(y, x)]);
+  const max = (1 << (b.adcBits || 10)) - 1;
+  const code = sol.code.replace(/«([^»]+)»/g, (_, t) => {
+    if (t === 'MAX') return String(max);
+    if (t === 'VREF') return (b.adcRef || b.logic || 5).toFixed(1);
+    if (/^ADC\d+$/.test(t)) return String(Math.round(+t.slice(3) * max / 1023));
+    const n = /^A\d$/.test(t) ? 14 + +t.slice(1) : +t;
+    return text.get(n) ?? (BOARDS.uno.pname(n));
+  });
+  return {comps: sol.comps, wires, code, pins: [...map].filter(([n, p]) => roles.get(n) !== 'sda' && roles.get(n) !== 'scl').map(([n, p]) => [BOARDS.uno.pname(n), b.pname(p.num)])};
+}
 function loadSolution(c){
-  stop(); if (LANG !== 'cpp') setLang('cpp', true); if (boardKey !== 'uno'){ boardKey = 'uno'; renderBoardSeg(); renderBoardTab(); }
+  const asked = boardKey; let P = portSolution(c), k = asked;
+  if (!P){ k = 'uno'; P = portSolution(c, 'uno'); }        // the board can't fit it (too few pins, or a reference-only board)
+  stop(); if (LANG !== 'cpp') setLang('cpp', true);
+  if (k !== boardKey){ boardKey = k; renderBoardSeg(); renderBoardTab(); }
   comps = []; wires = []; const ids = [];
-  c.sol.comps.forEach(([t, x, y, p]) => ids.push(addComp(t, x, y, p).id));
-  c.sol.wires.forEach(([a, z]) => { const r = s => s.replace(/^#(\d+)/, (m, i) => ids[+i]); addWire(r(a), r(z)); });
-  $('code').value = c.sol.code; highlight(); selected = null; renderInspector(); bump(); save(); renderChallenges(); fit();
+  P.comps.forEach(([t, x, y, p]) => ids.push(addComp(t, x, y, p).id));
+  P.wires.forEach(([a, z]) => { const r = s => s.replace(/^#(\d+)/, (m, i) => ids[+i]); addWire(r(a), r(z)); });
+  $('code').value = P.code; highlight(); selected = null; renderInspector(); bump(); save(); renderChallenges(); fit();
+  warnings.delete('solport');
+  if (k !== asked) warn('solport', `This solution needs pins the ${BOARDS[asked].short || BOARDS[asked].name} doesn't have free, so it loaded on the Uno instead.`, 'warning');
+  else if (k !== 'uno'){
+    const moved = P.pins.filter(([u, n]) => u !== n).map(([u, n]) => `${u} → ${n}`);
+    warn('solport', `Solution adapted for the ${B().short || B().name}${moved.length ? ': ' + moved.join(', ') : ''}. Sensors run from 3.3 V where the board needs it.${P.comps.length > c.sol.comps.length ? ' A 1 kΩ / 2 kΩ divider drops the HC-SR04 ECHO from 5 V to a safe 3.3 V.' : ''}`, 'ok');
+  }
+  return k;
 }
 /* ── Language switch: Arduino C++ / MicroPython ── */
 const MP_FAMS = /^(rp2040|rp2350|esp32|esp32s3|esp32c3|esp8266)$/;
@@ -7427,7 +7502,7 @@ $('langSeg').onclick = e => { const bt = e.target.closest('[data-lang]'); if (bt
 $('examples').onchange = e => {
   const id = e.target.value; e.target.value = ''; if (!id) return;
   if (LANG === 'py'){ const x = MP_EXAMPLES.find(m => m.id === id); if (x){ $('code').value = x.code; highlight(); save(); } return; }
-  const c = CH.find(x => x.id === id); if (c){ $('code').value = c.sol.code; highlight(); save(); }
+  const c = CH.find(x => x.id === id); if (c){ $('code').value = (portSolution(c) || portSolution(c, 'uno')).code; highlight(); save(); }
 };
 async function runPython(myRun, api){
   api.__STOP = STOP; api.Serial.begin(115200);

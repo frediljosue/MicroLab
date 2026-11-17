@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2.2.0 — 2026-11-17
+- **Practice keeps your board:** Load solution no longer switches to the Uno. Each solution is re-pinned for the board you picked: I²C goes to the board's SDA/SCL, analog inputs to ADC pins, other pins keep their number when they can, and flash, serial, input-only, analog-only and boot-strapping pins are skipped. On 3.3 V boards sensors run from 3V3, ADC math is scaled, and an HC-SR04 gets a 1 kΩ / 2 kΩ divider on ECHO. The console lists every pin that moved. If a board doesn't have enough free pins (keypad and robot on the ESP8266 / D1 Mini), it loads on the Uno and says why. Every solution is tested on the Uno, ESP32, Pico, Nano and Mega.
 - **My projects:** press 💾 Save (or `Ctrl+S`), name what's on the bench, and it appears under ★ Projects with Load, Delete and rename (double-click the name). Saving again with the same name updates that save. Board, language, code, parts, rotation and wires are all kept.
 - **Project files:** ⬇ File downloads a project as `.microlab.json` and ⬆ Open file brings it back, to back up, share, or move between devices.
 - **Rotate parts:** select a part and press `R` (clockwise) or `Shift+R` (counter-clockwise), or use the Rotate buttons in the Inspector. Pins, wires, wire routing, breadboard holes, the 3D view and saved layouts all follow the rotation. The breadboard itself doesn't rotate, and rotation is locked while a sketch runs.
