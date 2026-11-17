@@ -140,6 +140,12 @@ input[type=range]{accent-color:var(--accent)}
 .viewseg{position:absolute;left:12px;top:12px;display:flex;background:#111715e6;border:1px solid var(--line2);border-radius:10px;padding:3px;gap:3px;z-index:6;backdrop-filter:blur(4px)}
 .viewseg button{border:0;background:none;color:var(--muted);padding:6px 12px;border-radius:7px;cursor:pointer;font-weight:600;font-size:12.5px}
 .viewseg button.on{background:var(--panel3);color:var(--text)}
+.lockbadge{display:none;align-items:center;padding:0 10px;font-size:12px;font-weight:600;color:#f3c969;white-space:nowrap}
+body.running .lockbadge{display:flex}
+.lockbadge.flash{animation:lockflash .9s ease-out}
+@keyframes lockflash{0%{background:#f3c96933;border-radius:7px}100%{background:transparent}}
+body.running #bench [data-comp]{cursor:default}
+body.running #bench [data-pin]{cursor:not-allowed}
 #view3d{position:absolute;inset:0;display:none;background:#0c1411;z-index:3}
 #c3d{width:100%;height:100%;display:block;touch-action:none}
 .hud3d{position:absolute;right:12px;top:12px;width:310px;background:#111715e6;border:1px solid var(--line2);border-radius:12px;padding:10px;backdrop-filter:blur(4px);display:flex;flex-direction:column;gap:8px;font-size:12.5px}
@@ -286,7 +292,7 @@ input[type=range]{accent-color:var(--accent)}
   <section class="stage">
     <div id="svgWrap">
       <svg id="svg" viewBox="0 0 1400 900"></svg>
-      <div class="viewseg" id="viewSeg"><button data-view="2d" class="on">2D bench</button><button data-view="3d">3D view</button></div>
+      <div class="viewseg" id="viewSeg"><button data-view="2d" class="on">2D bench</button><button data-view="3d">3D view</button><span class="lockbadge" id="lockBadge" title="While the sketch runs, parts and wires stay put. You can still press buttons, turn knobs and inspect parts. Press Stop to rearrange.">🔒 Layout locked while running</span></div>
       <div id="view3d"><canvas id="c3d"></canvas><div class="hud3d" id="hud3d"></div></div>
       <div class="hint" id="hint"><b>Click a pin</b>, then another pin, to run a wire. Drag parts to move them. Scroll to zoom and drag the mat to pan.</div>
       <div class="wiretools" id="wiretools"><button class="btn sm" id="tidyBtn" title="Route every unlocked wire neatly around the parts">⌗ Tidy wires</button><label class="note" title="Re-route unlocked wires whenever you move parts or add wires"><input type="checkbox" id="keepTidy"> Keep tidy</label><button class="btn sm ghost" id="curvesBtn" title="Turn unlocked wires back into curves">Curves</button></div>
@@ -4600,7 +4606,16 @@ function stop(){
   comps.forEach(c => { if (c.type === 'relay') c.on = false; });
   bump(); setRunUI();
 }
+/* While a sketch runs the layout is locked: inputs (buttons, knobs, keypads) still work, moving and rewiring don't. */
+const layoutLocked = () => running;
+let lockNoted = -Infinity;
+function lockNote(){
+  const b = $('lockBadge'); if (b){ b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash'); }
+  const now = performance.now(); if (now - lockNoted < 4000) return; lockNoted = now;
+  warn('layoutlock', 'Parts and wires are locked while the sketch runs, so nothing moves by accident. You can still press buttons, turn knobs and click parts to inspect them. Press ■ Stop to rearrange.', 'info');
+}
 function setRunUI(){
+  document.body.classList.toggle('running', !!running);
   $('runBtn').className = 'btn ' + (running ? 'stop' : 'go');
   $('runBtn').innerHTML = running ? '■ Stop' : '▶ Upload &amp; Run';
   $('runPill').className = 'pill' + (running ? ' on' : '');
@@ -5357,6 +5372,7 @@ function pinLabel(pid){
 }
 function deleteSelected(){
   if (!selected) return;
+  if (layoutLocked()){ lockNote(); return; }
   if (selected.kind === 'wire') wires = wires.filter(w => w.id !== selected.id);
   else { const id = selected.id; comps = comps.filter(c => c.id !== id); wires = wires.filter(w => !w.a.startsWith(id + '.') && !w.b.startsWith(id + '.')); }
   selected = null; bump(); save(); renderInspector();
@@ -5394,17 +5410,23 @@ function addWire(a, z){
   wires.push({id: 'w' + (nid++), a, b: z, color: wireColor(a, z)}); bump(); save();
 }
 let drag = null, pressing = null, fromPin = false, pan = null, joyDrag = null;
+let lockDrag = null;
 svg.addEventListener('pointerdown', e => {
   const p = toWorld(e); mouse = p; $('hint').style.display = 'none';
-  const t = e.target.closest('[data-wpt],[data-wmid],[data-pin],[data-press],[data-key],[data-enc],[data-joy],[data-wire],[data-comp]');
+  let t = e.target.closest('[data-wpt],[data-wmid],[data-pin],[data-press],[data-key],[data-enc],[data-joy],[data-wire],[data-comp]');
+  if (t && t.dataset.wire){ // a wire's wide invisible hit band must not hide a button, key or knob underneath it
+    const ctl = document.elementsFromPoint(e.clientX, e.clientY).map(el => el.closest('[data-press],[data-key],[data-enc],[data-joy]')).find(Boolean);
+    if (ctl) t = ctl; }
   svg.setPointerCapture(e.pointerId);
   if (!t){ pan = {sx: e.clientX, sy: e.clientY, x: vb.x, y: vb.y, moved: false}; svg.classList.add('panning'); return; }
+  if ((t.dataset.wpt || t.dataset.wmid) && layoutLocked()){ lockNote(); return; }
   if (t.dataset.wpt || t.dataset.wmid){
     const [wid, k] = (t.dataset.wpt || t.dataset.wmid).split('|'), w = wires.find(x => x.id === wid); if (!w) return;
     let i = +k;
     if (t.dataset.wmid){ w.pts = w.pts || []; const Pp = wirePts(w); w.pts.splice(i, 0, {x: Math.round((Pp[i].x + Pp[i + 1].x) / 2), y: Math.round((Pp[i].y + Pp[i + 1].y) / 2)}); }
     w.manual = true; w.auto = false; wdrag = {w, i}; bump(); renderInspector(); return;
   }
+  if (t.dataset.pin && layoutLocked()){ lockNote(); return; }
   if (t.dataset.pin){
     const pid = t.dataset.pin;
     if (pending && pending !== pid){ addWire(pending, pid); pending = null; } else { pending = pid; fromPin = true; }
@@ -5426,6 +5448,7 @@ svg.addEventListener('pointerdown', e => {
   if (t.dataset.comp){
     const c = comps.find(x => x.id === t.dataset.comp);
     if (selected?.id !== c.id){ selected = {kind:'comp', id: c.id}; renderInspector(); }
+    if (layoutLocked()){ lockDrag = {sx: p.x, sy: p.y}; return; }
     drag = {c, dx: p.x - c.x, dy: p.y - c.y, carry: c.type !== 'bb' ? [] : comps.filter(o => o.type !== 'bb' && DEFS[o.type].pins.some(q => { const h = nearestHole(c, o.x + q.x, o.y + q.y); return h && h.d < 1.5; })).map(o => ({o, dx: o.x - c.x, dy: o.y - c.y}))};
   }
 });
@@ -5433,11 +5456,13 @@ svg.addEventListener('pointermove', e => {
   const p = toWorld(e); mouse = p;
   if (pan){ const r = Math.max(vb.w / svg.clientWidth, vb.h / svg.clientHeight); const dx = e.clientX - pan.sx, dy = e.clientY - pan.sy; if (Math.abs(dx) + Math.abs(dy) > 3) pan.moved = true; vb.x = pan.x - dx * r; vb.y = pan.y - dy * r; applyVB(); return; }
   if (wdrag){ wdrag.w.pts[wdrag.i] = snapBend(wdrag.w, wdrag.i, p); bump(); return; }
+  if (lockDrag){ if (Math.hypot(p.x - lockDrag.sx, p.y - lockDrag.sy) > 6){ lockNote(); lockDrag = null; } return; }
   if (drag){ drag.c.x = Math.round((p.x - drag.dx) / 2) * 2; drag.c.y = Math.round((p.y - drag.dy) / 2) * 2; drag.carry.forEach(k => { k.o.x = drag.c.x + k.dx; k.o.y = drag.c.y + k.dy; }); return; }
   if (joyDrag){ const c = joyDrag.c; c.props.x = Math.max(0, Math.min(1, joyDrag.ox + (p.x - joyDrag.sx) / 36)); c.props.y = Math.max(0, Math.min(1, joyDrag.oy + (p.y - joyDrag.sy) / 36)); bump(); return; }
   showTip(e);
 });
 svg.addEventListener('pointerup', e => {
+  lockDrag = null;
   svg.classList.remove('panning');
   if (pan){ if (!pan.moved){ pending = null; if (selected){ selected = null; renderInspector(); } } pan = null; return; }
   if (wdrag){ wdrag.w.pts = simplifyRoute(wdrag.w.pts); wdrag = null; bump(); save(); return; }
@@ -5548,7 +5573,7 @@ function renderPalette(){
   $('palette').innerHTML = h || '<div class="note">No parts match.</div>';
 }
 $('partSearch').oninput = renderPalette;
-$('palette').onclick = e => { const inf = e.target.closest('[data-pinfo]'); if (inf){ e.stopPropagation(); LIB.cat = 'All'; LIB.q = ''; $('libSearch').value = ''; openLib('parts', partKeyInfo(inf.dataset.pinfo).name); return; } const b = e.target.closest('[data-add]'); if (!b) return; const c = addComp(b.dataset.add); selected = {kind:'comp', id:c.id}; renderInspector(); $('hint').style.display = 'none'; };
+$('palette').onclick = e => { const inf = e.target.closest('[data-pinfo]'); if (inf){ e.stopPropagation(); LIB.cat = 'All'; LIB.q = ''; $('libSearch').value = ''; openLib('parts', partKeyInfo(inf.dataset.pinfo).name); return; } const b = e.target.closest('[data-add]'); if (!b) return; if (layoutLocked()){ lockNote(); return; } const c = addComp(b.dataset.add); selected = {kind:'comp', id:c.id}; renderInspector(); $('hint').style.display = 'none'; };
 
 /* board switching */
 function renderBoardSeg(){
@@ -6352,7 +6377,7 @@ function libPartsClick(e){
   const t = e.target;
   const c = t.closest('[data-pcat]'); if (c){ LIB.cat = c.dataset.pcat; renderLib(); return true; }
   const it = t.closest('[data-pitem]'); if (it){ LIB.part = it.dataset.pitem; renderLib(); return true; }
-  const ad = t.closest('[data-addpart]'); if (ad){ closeLib(); const cp = addComp(ad.dataset.addpart); selected = {kind:'comp', id:cp.id}; renderInspector(); $('hint').style.display = 'none'; return true; }
+  const ad = t.closest('[data-addpart]'); if (ad){ if (layoutLocked()){ closeLib(); lockNote(); return true; } closeLib(); const cp = addComp(ad.dataset.addpart); selected = {kind:'comp', id:cp.id}; renderInspector(); $('hint').style.display = 'none'; return true; }
   return false;
 }
 function libPartsChange(e){ if (e.target.matches('[data-simonly]')){ LIB.simOnly = e.target.checked; renderLib(); } }
@@ -7130,6 +7155,7 @@ function pick3D(e){
   }
   if (h.object.userData.press){ V3.release = pressPart(c); V3.ctl.enabled = false; if (selected?.id === c.id) renderInspector(); return; }
   selected = {kind: 'comp', id: c.id}; renderInspector();
+  if (layoutLocked()){ lockNote(); return; }
   const pt = floorPoint(m); if (!pt) return;
   V3.drag = {c, dx: pt.x - c.x, dz: pt.z - c.y}; V3.ctl.enabled = false;
 }

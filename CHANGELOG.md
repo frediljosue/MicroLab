@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.0 — 2026-11-17
+- **Layout lock while running:** parts and wires can't be moved, added, rewired or deleted by accident while a sketch runs. Buttons, keypads, knobs, joysticks and the Inspector still work. A "Layout locked while running" badge shows next to the 2D/3D switch; press Stop to rearrange.
+- Fix: a wire's invisible click band could cover a push button or keypad and swallow the press. Controls now win over overlapping wires.
+
 ## 2.0.0 — 2026-11-16
 - **C++ compiler** replaces the regex translator: per-board integer sizes, integer division, overflow warnings, `char`, structs, classes, references, `static` locals, `sizeof`, `sprintf`/`dtostrf`, and compile errors with line numbers and suggestions.
 - **MicroPython** on Pico and ESP boards: `machine`, `time`, `math`, `random`, `dht`, `neopixel`, `ssd1306`; MicroPython-style tracebacks.
