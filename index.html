@@ -6792,9 +6792,17 @@ function loadMine(id){ const p = mineList().find(x => x.id === id); if (!p) retu
 function deleteMine(id){ mineStore(mineList().filter(x => x.id !== id)); }
 function renameMine(id, name){ name = String(name || '').trim().slice(0, 60); if (!name) return; const l = mineList(), p = l.find(x => x.id === id); if (p){ p.name = name; mineStore(l); } }
 function fileName(name){ return (name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'project') + '.microlab.json'; }
-function downloadProject(name, state){
-  const blob = new Blob([JSON.stringify({format: FILE_FMT, version: 1, name, saved: new Date().toISOString(), state}, null, 1)], {type: 'application/json'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName(name);
+async function downloadProject(name, state){
+  const text = JSON.stringify({format: FILE_FMT, version: 1, name, saved: new Date().toISOString(), state}, null, 1), fn = fileName(name);
+  // inside the Claude artifact viewer, files go through its downloads capability (the viewer confirms the save)
+  if (typeof window.claude?.use === 'function'){
+    const dl = await window.claude.use('downloads');
+    if (!dl){ mineMsg('Downloads are not available in this view. Open MicroLab on its website to save project files.', 'warning'); return; }
+    try { await dl.save({filename: fn, data: text}); }
+    catch(e){ if (e?.code !== 'declined') mineMsg(`Couldn't save the file (${e?.code || 'error'}).`, 'warning'); }
+    return;
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type: 'application/json'})); a.download = fn;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 /* read a .microlab.json file: add it to My projects and put it on the bench */
