@@ -1,0 +1,8 @@
+{
+  "name": "microlab-tests",
+  "private": true,
+  "description": "A local copy of three.js r128 so the browser tests run fully offline.",
+  "devDependencies": {
+    "three": "0.128.0"
+  }
+}
