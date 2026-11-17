@@ -210,6 +210,10 @@ body.running #bench [data-pin]{cursor:not-allowed}
 .pc-parts{display:flex;flex-wrap:wrap;gap:4px}.pc-parts span{font-size:11.5px;padding:2px 7px;border:1px solid var(--line2);border-radius:6px;color:#c8d3ce}
 .pc-learn{font-size:12.5px;color:#c8d3ce}.pc-learn ul{margin:4px 0 0;padding-left:18px}.pc-learn li{margin:2px 0}
 .pcard .btn{align-self:flex-start;margin-top:auto}
+.pcard .row .btn{margin-top:0}
+.minebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}.minebar b{font-size:15px}.minebar input[type=text]{flex:1;min-width:180px}
+.pcard.mine{border-color:#3ddc9755}.mname{cursor:text}
+.h2sep{font-size:15px;font-weight:700;margin:20px 0 6px;padding-top:14px;border-top:1px solid var(--line)}
 .bitem,.pitem{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;border:1px solid transparent;background:none;color:var(--text);padding:7px 9px;border-radius:9px;cursor:pointer}
 .bitem:hover,.pitem:hover{background:var(--panel2)}
 .bitem.on,.pitem.on{background:var(--accent-bg);border-color:#1f4a36}
@@ -271,6 +275,7 @@ body.running #bench [data-pin]{cursor:not-allowed}
   <button class="btn ghost" id="learnBtn" title="Short lessons with try-it circuits">◎ Learn</button>
   <span class="sp"></span>
   <span class="pill" id="runPill"><i></i><span>USB unplugged</span></span>
+  <button class="btn ghost" id="saveBtn" title="Save this project by name (Ctrl+S)">💾 Save</button>
   <button class="btn ghost" id="clearBtn">Clear circuit</button>
   <button class="btn go" id="runBtn">▶ Upload &amp; Run</button>
 </header>
@@ -5555,6 +5560,7 @@ function showTip(e){
 }
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter'){ e.preventDefault(); start(); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')){ e.preventDefault(); openSave(); return; }
   if (['TEXTAREA','INPUT','SELECT'].includes(e.target.tagName)) return;
   if (e.key === 'Escape'){ pending = null; selected = null; renderInspector(); }
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected){ e.preventDefault(); deleteSelected(); }
@@ -6748,10 +6754,83 @@ function loadProject(pr){
   closeLib?.();
   warn('proj', `Loaded “${pr.title}”. Press Upload & Run.${/serial|print/i.test(pr.code) ? ' Open the Monitor tab to chart the readings.' : ''}`, 'ok');
 }
+/* ── My projects: named saves kept in this browser, plus export/import as a file ── */
+const MINE_KEY = 'microlab.projects', FILE_FMT = 'microlab-project';
+const mineMsg = (msg, level) => { warnings.delete('mine'); warn('mine', msg, level); };   // newest message replaces the last one
+function mineList(){ try { const a = JSON.parse(localStorage.getItem(MINE_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch(e){ return []; } }
+function mineStore(list){
+  try { localStorage.setItem(MINE_KEY, JSON.stringify(list)); return true; }
+  catch(e){ mineMsg('The browser is out of space for saved projects. Download some as files, then delete them here.', 'critical'); return false; }
+}
+function validState(d){ return d && typeof d === 'object' && Array.isArray(d.comps) && Array.isArray(d.wires) && typeof d.board === 'string'; }
+/* put a saved state on the bench, replacing what is there */
+function restoreState(d){
+  stop(); setBoard(BOARDS[d.board] ? d.board : 'uno');
+  comps = d.comps.filter(c => c && DEFS[c.type]).map(c => ({...c, turn: (c.turn | 0) & 3, props: {...(DEFS[c.type].props || {}), ...(c.props || {})}}));
+  wires = d.wires.filter(w => w && [w.a, w.b].every(p => typeof p === 'string' && (p.startsWith('B.') ? B().byId.has(p.slice(2)) : comps.some(c => p.startsWith(c.id + '.')))));
+  nid = Math.max(d.nid || 1, ...comps.map(c => (+String(c.id).slice(1) || 0) + 1));
+  CODEBUF.cpp = d.code ?? DEFAULT_CODE; CODEBUF.py = d.py ?? null;
+  LANG = d.lang === 'py' && mpOk() ? 'py' : 'cpp';
+  try { localStorage.setItem('microlab.lang', LANG); } catch(e){}
+  $('code').value = LANG === 'py' ? (d.py ?? MP_DEFAULT) : CODEBUF.cpp;
+  lastCompileErr = null; selected = null; pending = null;
+  highlight(); renderLangUI(); renderBoardSeg(); renderBoardTab(); renderInspector(); bump(); save(); fit();
+}
+function saveMine(name){
+  name = String(name || '').trim().slice(0, 60);
+  if (!name){ mineMsg('Give your project a name first.', 'info'); return null; }
+  const list = mineList(), now = Date.now(), st = benchState();
+  // same name (ignoring capitals) updates that save instead of making a duplicate
+  const old = list.find(p => p.name.toLowerCase() === name.toLowerCase());
+  if (old) Object.assign(old, {name, saved: now, state: st});
+  else list.unshift({id: 'm' + now.toString(36), name, saved: now, state: st});
+  if (!mineStore(list)) return null;
+  mineMsg(`${old ? 'Updated' : 'Saved'} “${name}” in My projects.`, 'ok');
+  return old || list[0];
+}
+function loadMine(id){ const p = mineList().find(x => x.id === id); if (!p) return; restoreState(p.state); closeLib?.(); mineMsg(`Loaded “${p.name}”. Press Upload & Run.`, 'ok'); }
+function deleteMine(id){ mineStore(mineList().filter(x => x.id !== id)); }
+function renameMine(id, name){ name = String(name || '').trim().slice(0, 60); if (!name) return; const l = mineList(), p = l.find(x => x.id === id); if (p){ p.name = name; mineStore(l); } }
+function fileName(name){ return (name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'project') + '.microlab.json'; }
+function downloadProject(name, state){
+  const blob = new Blob([JSON.stringify({format: FILE_FMT, version: 1, name, saved: new Date().toISOString(), state}, null, 1)], {type: 'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName(name);
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+/* read a .microlab.json file: add it to My projects and put it on the bench */
+async function importProject(file){
+  let d; try { d = JSON.parse(await file.text()); } catch(e){ mineMsg(`“${file.name}” isn't a MicroLab project file.`, 'warning'); return false; }
+  const st = d?.format === FILE_FMT ? d.state : d;          // also accept a bare saved state
+  if (!validState(st)){ mineMsg(`“${file.name}” isn't a MicroLab project file.`, 'warning'); return false; }
+  restoreState(st);
+  const p = saveMine(String(d.name || file.name.replace(/\.microlab\.json$|\.json$/i, '')));
+  if (p) mineMsg(`Imported “${p.name}” into My projects and loaded it. Press Upload & Run.`, 'ok');
+  return true;
+}
+function ago(t){ const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : new Date(t).toLocaleDateString(); }
+function mineView(q){
+  const list = mineList().filter(p => !q || p.name.toLowerCase().includes(q));
+  const card = p => { const st = p.state || {}, n = (st.comps || []).length;
+    return `<div class="pcard mine" data-mine="${p.id}">
+      <div class="pc-top"><b class="mname" title="Double-click to rename">${esc(p.name)}</b><span class="pc-lvl">${ago(p.saved)}</span></div>
+      <div class="pc-meta">${esc(BOARDS[st.board]?.name || st.board)} · ${st.lang === 'py' ? 'MicroPython' : 'Arduino C++'} · ${n} part${n === 1 ? '' : 's'} · ${(st.wires || []).length} wires</div>
+      <div class="row" style="margin-top:auto"><button class="btn sm go" data-mact="load">Load onto bench</button><button class="btn sm" data-mact="file" title="Download as a .microlab.json file">⬇ File</button><button class="btn sm danger" data-mact="del">Delete</button></div>
+    </div>`; };
+  return `<div class="minebar">
+      <b>My projects</b>
+      <input type="text" id="mineName" placeholder="Name what's on the bench now…" maxlength="60">
+      <button class="btn sm go" id="mineSave">💾 Save</button>
+      <button class="btn sm" id="mineImport" title="Open a .microlab.json file">⬆ Open file</button>
+      <input type="file" id="mineFile" accept=".json,application/json" hidden>
+    </div>
+    <p class="note" style="margin:0 0 10px">Saves live in this browser. Use <b>⬇ File</b> to back one up or move it to another device, and <b>⬆ Open file</b> to bring it back.</p>
+    ${list.length ? `<div class="pgrid">${list.map(card).join('')}</div>` : `<p class="note">${q ? 'No saved projects match your search.' : 'Nothing saved yet. Build something, name it above and press Save.'}</p>`}
+    <div class="h2sep">Example projects</div>`;
+}
 function projectsView(){
   const q = (LIB.q || '').toLowerCase();
   const list = PROJECTS.filter(p => !q || (p.title + ' ' + p.desc + ' ' + p.parts.join(' ') + ' ' + BOARDS[p.board].name).toLowerCase().includes(q));
-  return `<div class="lone"><p class="note" style="margin:0 0 12px">Each project loads a complete, working circuit and sketch onto the bench and replaces what is there now. Change anything, then break it on purpose to see what the simulator catches.</p>
+  return `<div class="lone">${mineView(q)}<p class="note" style="margin:0 0 12px">Each project loads a complete, working circuit and sketch onto the bench and replaces what is there now. Change anything, then break it on purpose to see what the simulator catches.</p>
   <div class="pgrid">${list.map(p => `<div class="pcard">
     <div class="pc-top"><b>${esc(p.title)}</b><span class="pc-lvl">${p.lvl}</span></div>
     <div class="pc-meta">${esc(BOARDS[p.board].name)} · ${p.lang === 'py' ? 'MicroPython' : 'Arduino C++'} · ≈${p.mins} min</div>
@@ -6933,6 +7012,14 @@ $('lib').addEventListener('click', e => {
   const lg = t.closest('[data-role]'); if (lg && t.closest('.legend')){ LIB.role = LIB.role === lg.dataset.role ? null : lg.dataset.role; return renderLib(); }
   const use = t.closest('[data-use]'); if (use){ requestBoard(use.dataset.use); closeLib(); return; }
   const ca = t.closest('[data-cmpadd]'); if (ca){ const k = ca.dataset.cmpadd; LIB.cmp = LIB.cmp.includes(k) ? LIB.cmp.filter(x => x !== k) : [...LIB.cmp, k].slice(-4); return renderLib(); }
+  const ma = t.closest('[data-mact]');
+  if (ma){ const id = ma.closest('[data-mine]').dataset.mine, p = mineList().find(x => x.id === id), act = ma.dataset.mact;
+    if (act === 'load') loadMine(id);
+    else if (act === 'file' && p) downloadProject(p.name, p.state);
+    else if (act === 'del'){ if (ma.dataset.arm){ deleteMine(id); renderLib(); } else { ma.dataset.arm = 1; ma.textContent = 'Really delete?'; setTimeout(() => { if (ma.isConnected){ delete ma.dataset.arm; ma.textContent = 'Delete'; } }, 2500); } }
+    return; }
+  if (t.id === 'mineSave'){ if (saveMine($('mineName').value)) renderLib(); return; }
+  if (t.id === 'mineImport'){ $('mineFile').click(); return; }
   const pj = t.closest('[data-proj]'); if (pj){ loadProject(PROJECTS.find(x => x.id === pj.dataset.proj)); return; }
   if (typeof learnClick === 'function' && learnClick(e)) return;
   if (typeof libPartsClick === 'function' && libPartsClick(e)) return;
@@ -6940,7 +7027,16 @@ $('lib').addEventListener('click', e => {
 $('lib').addEventListener('change', e => {
   const c = e.target.closest('[data-cmp]'); if (c){ const k = c.dataset.cmp; LIB.cmp = c.checked ? [...LIB.cmp.filter(x => x !== k), k].slice(-4) : LIB.cmp.filter(x => x !== k); renderLib(); }
   if (typeof libPartsChange === 'function') libPartsChange(e);
+  if (e.target.id === 'mineFile' && e.target.files[0]) importProject(e.target.files[0]).then(ok => { if (ok) closeLib(); });
 });
+$('lib').addEventListener('keydown', e => { if (e.target.id === 'mineName' && e.key === 'Enter' && saveMine(e.target.value)) renderLib(); });
+$('lib').addEventListener('dblclick', e => {
+  const n = e.target.closest('.mname'); if (!n) return;
+  const id = n.closest('[data-mine]').dataset.mine, p = mineList().find(x => x.id === id);
+  const v = p && prompt('Rename project', p.name); if (v){ renameMine(id, v); renderLib(); }
+});
+function openSave(){ openLib('projects'); const i = $('mineName'); if (i){ i.focus(); i.select(); } }
+$('saveBtn').onclick = openSave;
 $('libSearch').addEventListener('input', e => { LIB.q = e.target.value; renderLib(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && LIB.open) closeLib(); });
 $('libBtn').onclick = () => openLib('boards', boardKey);
@@ -7352,7 +7448,11 @@ const PY_TOK = /(#[^\n]*)|([rRbBfF]{0,2}(?:"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.
 
 /* ═══════════════════ Persistence ═══════════════════ */
 let saveT = null;
-function save(){ clearTimeout(saveT); saveT = setTimeout(() => { if (keepTidy && !routing && !wdrag && !drag && geoKey() !== lastGeo){ autoRoute(); return; } try { localStorage.setItem('mcusim.v2', JSON.stringify({comps: comps.map(({id, type, x, y, turn, props, burnt}) => ({id, type, x, y, turn, props, burnt})), wires, nid, board: boardKey, lang: LANG, code: LANG === 'cpp' ? $('code').value : (CODEBUF.cpp ?? DEFAULT_CODE), py: LANG === 'py' ? $('code').value : CODEBUF.py})); } catch(e){} }, 300); }
+function benchState(){
+  return {comps: comps.map(({id, type, x, y, turn, props, burnt}) => ({id, type, x, y, turn, props, burnt})), wires, nid, board: boardKey, lang: LANG,
+    code: LANG === 'cpp' ? $('code').value : (CODEBUF.cpp ?? DEFAULT_CODE), py: LANG === 'py' ? $('code').value : CODEBUF.py};
+}
+function save(){ clearTimeout(saveT); saveT = setTimeout(() => { if (keepTidy && !routing && !wdrag && !drag && geoKey() !== lastGeo){ autoRoute(); return; } try { localStorage.setItem('mcusim.v2', JSON.stringify(benchState())); } catch(e){} }, 300); }
 function load(){
   try {
     const d = JSON.parse(localStorage.getItem('mcusim.v2') || localStorage.getItem('mcusim.v1') || 'null');

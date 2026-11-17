@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2.2.0 — 2026-11-17
+- **My projects:** press 💾 Save (or `Ctrl+S`), name what's on the bench, and it appears under ★ Projects with Load, Delete and rename (double-click the name). Saving again with the same name updates that save. Board, language, code, parts, rotation and wires are all kept.
+- **Project files:** ⬇ File downloads a project as `.microlab.json` and ⬆ Open file brings it back, to back up, share, or move between devices.
 - **Rotate parts:** select a part and press `R` (clockwise) or `Shift+R` (counter-clockwise), or use the Rotate buttons in the Inspector. Pins, wires, wire routing, breadboard holes, the 3D view and saved layouts all follow the rotation. The breadboard itself doesn't rotate, and rotation is locked while a sketch runs.
 - Breadboard snapping now picks the position that seats the most legs in holes, so a resistor turned upright lands with both legs plugged in.
 

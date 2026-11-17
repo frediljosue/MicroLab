@@ -18,7 +18,7 @@ Place a board, wire up sensors, displays and motors, write real Arduino C++ or M
 | **Write real code** | Arduino C++ compiled with the board's real rules, or MicroPython on Pico and ESP boards. Real libraries: Servo, Wire, SD, DHT, Adafruit GFX/SSD1306/ILI9341/BME280/MPU6050/NeoPixel/PWMServoDriver, RTClib, TinyGPSPlus, HX711, Keypad, LiquidCrystal_I2C and more. |
 | **See what's happening** | Serial monitor, a live **serial plotter**, and a dashboard of every pin's state and every part's reading. |
 | **Get caught (kindly)** | Too much current on a pin, 5 V into a 3.3 V board, swapped SDA/SCL, I²C address clashes, a servo powered from USB, a missing pull-up, a GPS buffer overflowing because of `delay()`… each comes with a plain-language fix. |
-| **Learn** | 12 short lessons with try-it circuits and check questions, 17 practice challenges with automatic checking, and 10 complete projects to load and modify. |
+| **Learn** | 12 short lessons with try-it circuits and check questions, 17 practice challenges with automatic checking, and 10 complete projects to load and modify. Save your own builds by name and share them as `.microlab.json` files. |
 | **Look things up** | Specs, clickable pinouts and side-by-side comparison for 25 boards; datasheet-style info sheets for 77 components. |
 
 <table>
