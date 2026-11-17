@@ -28,7 +28,7 @@ def ids(lab, what):
     return lab.evaluate(f"{what}.map(x => x.id)")
 
 
-@pytest.mark.parametrize("pid", ["weather", "gpsspeed", "logger", "scale", "tilt", "servos", "nightlight", "mpweather", "airq"])
+@pytest.mark.parametrize("pid", ["weather", "gpsspeed", "logger", "scale", "tilt", "servos", "nightlight", "mpweather", "airq", "racer"])
 def test_project(lab, pid):
     r = lab.evaluate(PROJECT, pid)
     assert r["checks"] and all(r["checks"].values()), r
@@ -45,4 +45,4 @@ def test_lesson_tryit(lab, lid):
 
 
 def test_every_project_and_lesson_is_tested(lab):
-    assert len(ids(lab, "PROJECTS")) == 9 and len(ids(lab, "LESSONS")) == 12
+    assert len(ids(lab, "PROJECTS")) == 10 and len(ids(lab, "LESSONS")) == 12

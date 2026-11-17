@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2.1.0 — 2026-11-17
+- New project: **Retro Racer**, a color TFT game for ESP32 with joystick and buttons, using flicker-free partial redraws.
 - **Layout lock while running:** parts and wires can't be moved, added, rewired or deleted by accident while a sketch runs. Buttons, keypads, knobs, joysticks and the Inspector still work. A "Layout locked while running" badge shows next to the 2D/3D switch; press Stop to rearrange.
 - Fix: a wire's invisible click band could cover a push button or keypad and swallow the press. Controls now win over overlapping wires.
 

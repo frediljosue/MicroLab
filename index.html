@@ -6088,6 +6088,560 @@ while True:
     print(f"temp:{t:.1f} hum:{h:.1f}")   # chart it in the Monitor tab
     time.sleep(2)                        # DHT22: one reading every 2 s
 ` },
+  { id:'racer', title:'Retro Racer (color TFT game)', board:'esp32', lvl:'Advanced', mins:40,
+    desc:'A top-down traffic dodger on a 2.8" color TFT. Steer with a joystick, start and pause with two buttons. Written for real hardware: it redraws only what moves, so the screen doesn\'t flicker.',
+    learn:['Drawing fast on a TFT with partial redraws', 'Game states with an enum and a switch', 'Joystick calibration, dead zones and button edge detection'],
+    parts:['ILI9341 TFT', 'Joystick', '2 × push button'],
+    comps:[['tft', 860, 260], ['joy', 660, 520], ['button', 820, 620], ['button', 900, 620]],
+    wires:[['#0.VCC','B.3V3'],['#0.GND','B.GND2'],['#0.CS','B.G15'],['#0.RESET','B.G4'],['#0.DC','B.G2'],['#0.MOSI','B.G23'],['#0.SCK','B.G18'],['#0.LED','B.3V3'],['#0.MISO','B.G19'],
+      ['#1.GND','B.GND3'],['#1.VCC','B.3V3'],['#1.VRX','B.G34'],['#1.VRY','B.G35'],['#1.SW','B.G32'],['#2.1','B.G25'],['#2.2','B.GND1'],['#3.1','B.G26'],['#3.2','B.GND1']],
+    expect:{serial:/Retro Racer TFT ready/},
+    code:`/*
+  RETRO RACER (TFT edition) - top-down traffic dodger for ESP32 + 2.8" ILI9341 color TFT
+  Parts: ESP32 DevKit V1, 2.8" 320x240 SPI TFT (ILI9341), analog joystick, 2 push buttons
+
+  Wiring
+    TFT    VCC -> 3V3   GND -> GND   CS -> GPIO15   RESET -> GPIO4   DC -> GPIO2
+           MOSI -> GPIO23   SCK -> GPIO18   LED -> 3V3   MISO -> GPIO19
+    Joy    GND -> GND   +5V -> 3V3   VRx -> GPIO34   VRy -> GPIO35   SW -> GPIO32
+    Button A (start / restart): one leg -> GPIO25, other leg -> GND
+    Button B (pause):           one leg -> GPIO26, other leg -> GND
+
+  Controls
+    Joystick left/right = steer
+    Joystick up         = gas (faster, more points)
+    Joystick down       = brake
+    Button A / joystick click = start, restart
+    Button B            = pause
+
+  Libraries: Adafruit ILI9341 + Adafruit GFX
+
+  Why the drawing works differently from the OLED version:
+  a TFT is too slow to clear and redraw all 320x240 pixels every frame without
+  flickering, so this version only redraws what changed: the strip a car moved
+  out of, the cars themselves, the scrolling stripes and HUD numbers that changed.
+*/
+
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+
+// ---------- Hardware ----------
+#define TFT_CS  15
+#define TFT_DC  2
+#define TFT_RST 4
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+
+#define SCREEN_W 320   // landscape (rotation 1)
+#define SCREEN_H 240
+
+const int PIN_JOY_X  = 34;
+const int PIN_JOY_Y  = 35;
+const int PIN_JOY_SW = 32;
+const int PIN_BTN_A  = 25;
+const int PIN_BTN_B  = 26;
+
+// Flip these if steering or gas feel backwards
+const bool INVERT_X = false;
+const bool INVERT_Y = false;
+
+// ---------- Colors (RGB565) ----------
+const uint16_t C_GRASS   = 0x2C64;   // dark green
+const uint16_t C_GRASS2  = 0x3D06;   // lighter grass stripe
+const uint16_t C_ROAD    = 0x4208;   // asphalt gray
+const uint16_t C_LINE    = 0xFFFF;   // white lane paint
+const uint16_t C_RUMBLE1 = 0xE8E4;   // red
+const uint16_t C_RUMBLE2 = 0xFFFF;   // white
+const uint16_t C_PANEL   = 0x0000;   // HUD background
+const uint16_t C_LABEL   = 0x9CF3;   // gray labels
+const uint16_t C_TEXT    = 0xFFFF;
+const uint16_t C_ACCENT  = 0xFE60;   // yellow
+const uint16_t C_PLAYER  = 0xF9A0;   // orange-red
+const uint16_t C_GLASS   = 0x6DFF;   // light blue windshield
+const uint16_t C_TIRE    = 0x0841;   // near black
+const uint16_t TRAFFIC_COLORS[] = {0x2C9F, 0xFFE0, 0x07E6, 0xA81F, 0x07FF, 0xFC10};
+const int NUM_TRAFFIC_COLORS = 6;
+
+// ---------- Game layout ----------
+const int ROAD_L = 24;                         // left edge of road
+const int ROAD_R = 204;                        // right edge of road
+const int LANES  = 3;
+const int LANE_W = (ROAD_R - ROAD_L) / LANES;  // 60 px
+const int CAR_W  = 24;
+const int CAR_H  = 40;
+const int HUD_X  = 222;
+const int STRIPE = 45;                         // stripe period in pixels
+const int DASH   = 22;                         // dash length
+const int FRAME_MS = 33;                       // ~30 fps
+
+// The game logic still runs in the OLED version's units, then gets scaled to the
+// bigger screen, so speeds, the difficulty curve and scores feel the same.
+const float Y_SCALE = SCREEN_H / 64.0f;        // 3.75
+const float X_SCALE = LANE_W / 28.0f;          // about 2.14
+
+// ---------- Game state ----------
+struct Enemy {
+  float x, y;
+  int lane;
+  bool active;
+  uint16_t color;
+  int drawnX, drawnY;   // where it is currently drawn on screen
+  bool drawn;
+};
+const int MAX_ENEMIES = 5;
+Enemy enemies[MAX_ENEMIES];
+
+enum State { TITLE, PLAYING, PAUSED, CRASH, GAMEOVER };
+State state = TITLE;
+bool fullRedraw = true;   // set when a screen needs to be drawn from scratch
+
+float playerX;
+const int playerY = SCREEN_H - CAR_H - 6;
+int playerDrawnX = -1;
+float speed = 0;
+float distance = 0;
+float nextSpawnAt = 0;
+float stripeOffset = 0;
+unsigned long bonus = 0;
+unsigned long score = 0;
+unsigned long highScore = 0;
+bool newHigh = false;
+int lives = 3;
+int crashX, crashY;
+
+// last values shown on the HUD, so numbers are only redrawn when they change
+long shownScore = -1, shownHigh = -1;
+int shownLives = -1, shownBar = -1;
+
+unsigned long lastFrame = 0;
+unsigned long stateTimer = 0;
+int joyCenterX = 2048, joyCenterY = 2048;
+bool prevA = false, prevB = false, prevSW = false;
+
+// ---------- Helpers ----------
+bool justPressed(int pin, bool &prev) {
+  bool down = digitalRead(pin) == LOW;
+  bool edge = down && !prev;
+  prev = down;
+  return edge;
+}
+
+float readAxis(int pin, int center, bool invert) {
+  float v = (analogRead(pin) - center) / 2048.0f;
+  if (fabs(v) < 0.12f) v = 0;          // dead zone
+  v = constrain(v, -1.0f, 1.0f);
+  return invert ? -v : v;
+}
+
+int laneX(int lane) {
+  return ROAD_L + lane * LANE_W + (LANE_W - CAR_W) / 2;
+}
+
+bool overlap(float ax, float ay, float bx, float by) {
+  const int pad = 3;  // slightly forgiving hitbox
+  return ax + pad < bx + CAR_W - pad && ax + CAR_W - pad > bx + pad &&
+         ay + pad < by + CAR_H - pad && ay + CAR_H - pad > by + pad;
+}
+
+// Paint road over the part of a car's old box that the new box doesn't cover.
+void eraseVacated(int ox, int oy, int nx, int ny) {
+  if (ny > oy) tft.fillRect(ox, oy, CAR_W, min(ny - oy, CAR_H), C_ROAD);              // moved down
+  if (ny < oy) tft.fillRect(ox, max(ny + CAR_H, oy), CAR_W, min(oy - ny, CAR_H), C_ROAD);
+  if (nx > ox) tft.fillRect(ox, oy, min(nx - ox, CAR_W), CAR_H, C_ROAD);              // moved right
+  if (nx < ox) tft.fillRect(max(nx + CAR_W, ox), oy, min(ox - nx, CAR_W), CAR_H, C_ROAD);
+}
+
+// ---------- Drawing ----------
+void drawCar(int x, int y, bool isPlayer, uint16_t body) {
+  // the car paints its whole box, so no old pixels are left behind
+  tft.fillRect(x, y, CAR_W, CAR_H, C_ROAD);
+  // tires
+  tft.fillRect(x,             y + 5,          4, 9, C_TIRE);
+  tft.fillRect(x + CAR_W - 4, y + 5,          4, 9, C_TIRE);
+  tft.fillRect(x,             y + CAR_H - 14, 4, 9, C_TIRE);
+  tft.fillRect(x + CAR_W - 4, y + CAR_H - 14, 4, 9, C_TIRE);
+  // body
+  tft.fillRoundRect(x + 3, y, CAR_W - 6, CAR_H, 5, body);
+  // windshield: player faces up, traffic faces down
+  if (isPlayer) {
+    tft.fillRoundRect(x + 6, y + 8, CAR_W - 12, 8, 2, C_GLASS);    // front glass
+    tft.fillRect(x + 7, y + CAR_H - 9, CAR_W - 14, 4, C_GLASS);    // rear glass
+    tft.fillRect(x + 6, y + 1, 3, 2, C_ACCENT);                     // headlights
+    tft.fillRect(x + CAR_W - 9, y + 1, 3, 2, C_ACCENT);
+    tft.drawFastVLine(x + CAR_W / 2, y + 18, 12, C_TEXT);          // racing stripe
+  } else {
+    tft.fillRoundRect(x + 6, y + CAR_H - 16, CAR_W - 12, 8, 2, C_GLASS);
+    tft.fillRect(x + 7, y + 5, CAR_W - 14, 4, C_GLASS);
+    tft.fillRect(x + 6, y + CAR_H - 3, 3, 2, C_ACCENT);
+    tft.fillRect(x + CAR_W - 9, y + CAR_H - 3, 3, 2, C_ACCENT);
+  }
+}
+
+// Scrolling parts (lane dashes, rumble strips) repaint their whole column each
+// frame: cheap thin strips instead of a whole-screen clear.
+void drawStripes() {
+  int off = (int)stripeOffset;
+  for (int y = -STRIPE + off; y < SCREEN_H; y += STRIPE) {
+    // rumble strips: red and white blocks on both road edges
+    tft.fillRect(ROAD_L - 9, y, 7, DASH, C_RUMBLE1);
+    tft.fillRect(ROAD_L - 9, y + DASH, 7, STRIPE - DASH, C_RUMBLE2);
+    tft.fillRect(ROAD_R + 3, y, 7, DASH, C_RUMBLE1);
+    tft.fillRect(ROAD_R + 3, y + DASH, 7, STRIPE - DASH, C_RUMBLE2);
+    // dashed lane dividers
+    for (int i = 1; i < LANES; i++) {
+      int x = ROAD_L + i * LANE_W - 1;
+      tft.fillRect(x, y, 3, DASH, C_LINE);
+      tft.fillRect(x, y + DASH, 3, STRIPE - DASH, C_ROAD);
+    }
+  }
+}
+
+void drawStaticRoad() {
+  // grass with a little texture, solid road edges, then the asphalt
+  for (int y = 0; y < SCREEN_H; y += 20) {
+    uint16_t g = (y / 20) % 2 ? C_GRASS : C_GRASS2;
+    tft.fillRect(0, y, ROAD_L - 10, 20, g);
+    tft.fillRect(ROAD_R + 11, y, HUD_X - ROAD_R - 13, 20, g);
+  }
+  tft.fillRect(ROAD_L - 2, 0, 2, SCREEN_H, C_LINE);
+  tft.fillRect(ROAD_R, 0, 2, SCREEN_H, C_LINE);
+  tft.fillRect(ROAD_L, 0, ROAD_R - ROAD_L, SCREEN_H, C_ROAD);
+}
+
+void label(const char *txt, int x, int y, int size, uint16_t color) {
+  tft.setTextSize(size);
+  tft.setTextColor(color, C_PANEL);
+  tft.setCursor(x, y);
+  tft.print(txt);
+}
+
+void drawHUDFrame() {
+  tft.fillRect(HUD_X - 2, 0, SCREEN_W - HUD_X + 2, SCREEN_H, C_PANEL);
+  tft.drawFastVLine(HUD_X - 2, 0, SCREEN_H, C_LABEL);
+  label("SCORE", HUD_X + 6, 10, 2, C_LABEL);
+  label("BEST", HUD_X + 6, 62, 2, C_LABEL);
+  label("SPEED", HUD_X + 6, 114, 2, C_LABEL);
+  label("LIVES", HUD_X + 6, 172, 2, C_LABEL);
+  tft.drawRect(HUD_X + 6, 136, 84, 14, C_LABEL);
+  shownScore = shownHigh = -1;
+  shownLives = shownBar = -1;
+}
+
+void drawHUD() {
+  char buf[12];
+  if ((long)score != shownScore) {
+    sprintf(buf, "%-7lu", score);           // pad with spaces to erase old digits
+    label(buf, HUD_X + 6, 32, 2, C_TEXT);
+    shownScore = score;
+  }
+  if ((long)highScore != shownHigh) {
+    sprintf(buf, "%-7lu", highScore);
+    label(buf, HUD_X + 6, 84, 2, C_ACCENT);
+    shownHigh = highScore;
+  }
+  int bar = constrain((int)(speed / 7.0f * 80), 0, 80);
+  if (bar != shownBar) {
+    uint16_t c = bar < 40 ? 0x07E0 : (bar < 62 ? C_ACCENT : C_RUMBLE1);   // green, yellow, red
+    tft.fillRect(HUD_X + 8, 138, bar, 10, c);
+    tft.fillRect(HUD_X + 8 + bar, 138, 80 - bar, 10, C_PANEL);
+    shownBar = bar;
+  }
+  if (lives != shownLives) {
+    for (int i = 0; i < 3; i++) {
+      uint16_t c = i < lives ? C_PLAYER : 0x2104;
+      tft.fillRoundRect(HUD_X + 8 + i * 28, 196, 20, 26, 4, c);
+      tft.fillRect(HUD_X + 12 + i * 28, 201, 12, 5, i < lives ? C_GLASS : 0x2104);
+    }
+    shownLives = lives;
+  }
+}
+
+void drawFullScene() {
+  drawStaticRoad();
+  drawHUDFrame();
+  for (int i = 0; i < MAX_ENEMIES; i++) enemies[i].drawn = false;
+  playerDrawnX = -1;
+}
+
+// Draw the moving parts of one frame, touching as few pixels as possible.
+void drawFrame() {
+  for (int i = 0; i < MAX_ENEMIES; i++) {
+    Enemy &e = enemies[i];
+    if (!e.drawn) continue;
+    if (!e.active) {                                  // left the screen or cleared
+      tft.fillRect(e.drawnX, e.drawnY, CAR_W, CAR_H, C_ROAD);
+      e.drawn = false;
+    } else {
+      eraseVacated(e.drawnX, e.drawnY, (int)e.x, (int)e.y);
+    }
+  }
+  if (playerDrawnX >= 0) eraseVacated(playerDrawnX, playerY, (int)playerX, playerY);
+
+  drawStripes();
+
+  for (int i = 0; i < MAX_ENEMIES; i++) {
+    Enemy &e = enemies[i];
+    if (!e.active) continue;
+    drawCar((int)e.x, (int)e.y, false, e.color);
+    e.drawnX = (int)e.x; e.drawnY = (int)e.y; e.drawn = true;
+  }
+  drawCar((int)playerX, playerY, true, C_PLAYER);
+  playerDrawnX = (int)playerX;
+  drawHUD();
+}
+
+void centeredText(const char *txt, int y, int size, uint16_t color, uint16_t bg) {
+  tft.setTextSize(size);
+  tft.setTextColor(color, bg);
+  int w = strlen(txt) * 6 * size;
+  tft.setCursor((SCREEN_W - w) / 2, y);
+  tft.print(txt);
+}
+
+// text centered over the road (inside the title box)
+void roadText(const char *txt, int y, int size, uint16_t color) {
+  tft.setTextSize(size);
+  tft.setTextColor(color, C_PANEL);
+  int w = strlen(txt) * 6 * size;
+  tft.setCursor(ROAD_L + (ROAD_R - ROAD_L - w) / 2, y);
+  tft.print(txt);
+}
+
+void dialog(int x, int y, int w, int h, uint16_t border) {
+  tft.fillRoundRect(x, y, w, h, 8, C_PANEL);
+  tft.drawRoundRect(x, y, w, h, 8, border);
+  tft.drawRoundRect(x + 2, y + 2, w - 4, h - 4, 6, border);
+}
+
+// ---------- Game logic ----------
+void clearTraffic() {
+  for (int i = 0; i < MAX_ENEMIES; i++) enemies[i].active = false;
+  nextSpawnAt = distance + 30;
+}
+
+void resetGame() {
+  lives = 3;
+  distance = 0;
+  bonus = 0;
+  score = 0;
+  newHigh = false;
+  stripeOffset = 0;
+  playerX = laneX(1);
+  clearTraffic();
+}
+
+void trySpawn() {
+  int lane = random(LANES);
+  int blocked = 0;
+  // look at cars near the top so we never build a wall across all lanes
+  for (int i = 0; i < MAX_ENEMIES; i++) {
+    if (enemies[i].active && enemies[i].y < CAR_H * 2 + 10 * Y_SCALE) {
+      blocked |= (1 << enemies[i].lane);
+    }
+  }
+  if (blocked & (1 << lane)) return;
+  if ((blocked | (1 << lane)) == 7) return;  // 7 = all three lanes blocked
+
+  for (int i = 0; i < MAX_ENEMIES; i++) {
+    if (!enemies[i].active) {
+      enemies[i].x = laneX(lane);
+      enemies[i].y = -CAR_H;
+      enemies[i].lane = lane;
+      enemies[i].color = TRAFFIC_COLORS[random(NUM_TRAFFIC_COLORS)];
+      enemies[i].active = true;
+      return;
+    }
+  }
+}
+
+// TODO (your turn): design the difficulty curve.
+// dist = how far you've driven, jy = joystick Y from -1 (up) to +1 (down).
+// Return the scroll speed in OLED pixels per frame (the game scales it to the TFT).
+// Around 1.5 feels calm, 7 is chaos.
+// The version below is a working default: linear ramp, capped, with gas and brake.
+float computeSpeed(float dist, float jy) {
+  float baseSpeed = min(1.5f + dist / 1500.0f, 4.5f);
+  if (jy < -0.3f) return baseSpeed * 1.6f;   // gas
+  if (jy > 0.3f)  return baseSpeed * 0.5f;   // brake
+  return baseSpeed;
+}
+
+void updatePlaying() {
+  float jx = readAxis(PIN_JOY_X, joyCenterX, INVERT_X);
+  float jy = readAxis(PIN_JOY_Y, joyCenterY, INVERT_Y);
+
+  speed = computeSpeed(distance, jy);
+  float px = speed * Y_SCALE;                 // pixels to scroll this frame
+
+  // steering
+  playerX += jx * 3.0f * X_SCALE;
+  playerX = constrain(playerX, (float)ROAD_L + 2, (float)(ROAD_R - CAR_W - 2));
+
+  // scrolling
+  stripeOffset += px;
+  while (stripeOffset >= STRIPE) stripeOffset -= STRIPE;
+  distance += speed;
+
+  // traffic gets denser over time
+  if (distance >= nextSpawnAt) {
+    trySpawn();
+    float gapMin = max(18.0f, 45.0f - distance / 400.0f);
+    nextSpawnAt = distance + random((int)gapMin, (int)gapMin * 2);
+  }
+
+  // move traffic and check collisions
+  for (int i = 0; i < MAX_ENEMIES; i++) {
+    if (!enemies[i].active) continue;
+    enemies[i].y += px * 0.7f;
+    if (enemies[i].y > SCREEN_H) {
+      enemies[i].active = false;
+      bonus += 5;  // points for every car you pass
+      continue;
+    }
+    if (overlap(playerX, playerY, enemies[i].x, enemies[i].y)) {
+      crashX = (int)playerX + CAR_W / 2;
+      crashY = playerY + CAR_H / 2;
+      lives--;
+      state = CRASH;
+      stateTimer = millis();
+      return;  // one crash per frame
+    }
+  }
+
+  score = (unsigned long)(distance / 10) + bonus;
+}
+
+void startGame() {
+  resetGame();
+  state = PLAYING;
+  fullRedraw = true;
+}
+
+// ---------- Setup / loop ----------
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_BTN_A, INPUT_PULLUP);
+  pinMode(PIN_BTN_B, INPUT_PULLUP);
+  pinMode(PIN_JOY_SW, INPUT_PULLUP);
+  analogReadResolution(12);
+
+  tft.begin();
+  tft.setRotation(1);   // landscape, 320 x 240
+  tft.setTextWrap(false);
+  tft.fillScreen(C_PANEL);
+
+  // calibrate joystick center, so leave it untouched at boot
+  long sx = 0, sy = 0;
+  for (int i = 0; i < 16; i++) {
+    sx += analogRead(PIN_JOY_X);
+    sy += analogRead(PIN_JOY_Y);
+    delay(5);
+  }
+  joyCenterX = sx / 16;
+  joyCenterY = sy / 16;
+
+  randomSeed(micros() + analogRead(PIN_JOY_X) * 31 + analogRead(PIN_JOY_Y));
+  resetGame();
+  Serial.println("Retro Racer TFT ready");
+}
+
+void loop() {
+  unsigned long now = millis();
+  if (now - lastFrame < FRAME_MS) return;
+  lastFrame = now;
+
+  bool aDown = justPressed(PIN_BTN_A, prevA);
+  bool swDown = justPressed(PIN_JOY_SW, prevSW);
+  bool startPressed = aDown || swDown;
+  bool pausePressed = justPressed(PIN_BTN_B, prevB);
+
+  switch (state) {
+    case TITLE:
+      if (fullRedraw) {
+        drawStaticRoad();
+        tft.fillRect(HUD_X - 2, 0, SCREEN_W - HUD_X + 2, SCREEN_H, C_PANEL);
+        tft.drawFastVLine(HUD_X - 2, 0, SCREEN_H, C_LABEL);
+        label("BEST", HUD_X + 6, 10, 2, C_LABEL);
+        fullRedraw = false;
+      }
+      stripeOffset += 3.0f;
+      if (stripeOffset >= STRIPE) stripeOffset -= STRIPE;
+      drawStripes();
+      dialog(ROAD_L + 14, 46, ROAD_R - ROAD_L - 28, 76, C_ACCENT);
+      roadText("RETRO", 58, 3, C_ACCENT);
+      roadText("RACER", 90, 3, C_PLAYER);
+      drawCar(laneX(1), playerY, true, C_PLAYER);
+      tft.setTextSize(2); tft.setTextColor(C_ACCENT, C_PANEL); tft.setCursor(HUD_X + 6, 32); tft.print(highScore);
+      label((now / 400) % 2 ? "PRESS A" : "       ", HUD_X + 6, 120, 2, C_TEXT);
+      label("TO PLAY", HUD_X + 6, 142, 2, (now / 400) % 2 ? C_TEXT : C_PANEL);
+      if (startPressed) startGame();
+      break;
+
+    case PLAYING:
+      if (fullRedraw) { drawFullScene(); fullRedraw = false; }
+      if (pausePressed) {
+        state = PAUSED;
+        dialog(ROAD_L + 30, 92, ROAD_R - ROAD_L - 60, 52, C_TEXT);
+        tft.setTextSize(2); tft.setTextColor(C_TEXT, C_PANEL);
+        tft.setCursor(ROAD_L + 54, 110); tft.print("PAUSED");
+        break;
+      }
+      updatePlaying();
+      drawFrame();
+      break;
+
+    case PAUSED:
+      if (pausePressed || startPressed) {
+        state = PLAYING;
+        drawStaticRoad();             // remove the dialog, cars are redrawn next frame
+        for (int i = 0; i < MAX_ENEMIES; i++) enemies[i].drawn = false;
+        playerDrawnX = -1;
+      }
+      break;
+
+    case CRASH: {
+      unsigned long t = now - stateTimer;
+      int r = (t / 50) % 12 + 3;  // expanding explosion
+      tft.fillCircle(crashX, crashY, r + 6, (t / 100) % 2 ? 0xFD20 : C_ACCENT);
+      tft.fillCircle(crashX, crashY, r / 2 + 2, C_RUMBLE1);
+      if (t > 1200) {
+        if (lives > 0) {
+          clearTraffic();
+          playerX = laneX(1);
+          state = PLAYING;
+          fullRedraw = true;
+        } else {
+          if (score > highScore) {
+            highScore = score;
+            newHigh = true;
+          }
+          state = GAMEOVER;
+          stateTimer = now;
+          fullRedraw = true;
+        }
+      }
+      break;
+    }
+
+    case GAMEOVER:
+      if (fullRedraw) {
+        tft.fillScreen(C_PANEL);
+        dialog(30, 20, 260, 200, C_RUMBLE1);
+        centeredText("GAME OVER", 40, 3, C_RUMBLE1, C_PANEL);
+        char buf[24];
+        sprintf(buf, "SCORE %lu", score);
+        centeredText(buf, 96, 2, C_TEXT, C_PANEL);
+        sprintf(buf, "BEST  %lu", highScore);
+        centeredText(buf, 124, 2, C_ACCENT, C_PANEL);
+        fullRedraw = false;
+      }
+      if (newHigh) centeredText("NEW RECORD!", 168, 2, (now / 300) % 2 ? C_ACCENT : C_PANEL, C_PANEL);
+      else centeredText("PRESS A", 172, 2, (now / 400) % 2 ? C_TEXT : C_PANEL, C_PANEL);
+      if (startPressed && now - stateTimer > 800) startGame();
+      break;
+  }
+}
+` },
   { id:'airq', title:'Air quality traffic light', board:'uno', lvl:'Beginner', mins:15,
     desc:'An MQ-135 gas sensor gives a relative air-quality level, shown as green, orange or red on an RGB LED.',
     learn:['Thresholds with if / else if', 'Mixing colours with PWM', 'Why cheap gas sensors give relative, not ppm, readings'],
